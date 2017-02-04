@@ -1,0 +1,14 @@
+
+MA:4055c300:19	switch/reading "on":true
+MA:4055cc00:19	switch/reading "on":false
+
+MA:405d0300:19	switch/audi "on":true
+MA:40550000:19	switch/audi "on":true
+MA:405d0c00:19	switch/audi "on":false
+
+MA:40553300:19	switch/bar "on":true
+MA:40553c00:19	switch/bar "on":false
+
+MA:3d65e400:19	switch/office "on":true
+MA:3d65e200:19	switch/office "on":false
+	
