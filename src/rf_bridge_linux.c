@@ -106,7 +106,8 @@ static void weather_decode() {
 	uint8_t channel = (msg[3] >> 4) & 7;
 
 	if (chk == msg[6]) {
-		printf("%% Station:%3d Chan: %d Hum:%2d%% Temp:%2d.%dC %s\n",
+		if (0)
+			printf("%% Station:%3d Chan: %d Hum:%2d%% Temp:%2d.%dC %s\n",
 				station, channel, hum,
 				temp / 10, temp % 10,
 				bat ? " LOW BAT":"");
@@ -257,6 +258,7 @@ void display() {
 			}
 		}
 	}
+#if 0
 	if (bcount < 16)
 		return;
 	chk = 0x55;
@@ -266,7 +268,8 @@ void display() {
 		chk += msg[i];
 	}
 	chk += bcount;
-	printf(":%02x*%02x\n", bcount, chk);
+	printf("#%02x*%02x\n", bcount, chk);
+#endif
 }
 
 static uint8_t getsbyte(const char * s) {
@@ -398,9 +401,13 @@ int main(int argc, const char *argv[])
 			uint8_t d = getsbyte(cur + 1);
 			cur += 3;
 			switch (what) {
-				case ':': /* number of bits in sequence */
+				case '#': /* number of bits in sequence */
 					bcount = d;
 					inchk += bcount;
+					break;
+				case '!': /* pulse duration */
+					inchk += d;
+					/* don't really need this at this end */
 					break;
 				case '*': /* checksum */
 					if (d == inchk) {
@@ -408,10 +415,6 @@ int main(int argc, const char *argv[])
 							decoder(pulsecount);
 						display();
 					}
-					break;
-				case '!': /* pulse duration */
-					inchk += d;
-					/* don't really need this at this end */
 					break;
 			}
 		}
