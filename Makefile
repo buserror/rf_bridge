@@ -1,7 +1,7 @@
 SHELL=/bin/bash
 
 # default frequency
-FREQ = 8000000
+FREQ = 16000000
 O = build
 
 ifeq (${V},)
@@ -39,20 +39,18 @@ ${O}/%.axf: avr/%.c
 clean:
 	rm -rf ${O}
 
-${O}/atmega2560_rf433_bridge.axf: FREQ=16000000
-${O}/atmega2560_rf433_bridge.axf: avr/rf_bridge_uart.c
-${O}/atmega2560_rf433_bridge.axf: avr/rf_bridge_common.c
+${O}/atmega2560_rf_bridge.axf: avr/rf_bridge_uart.c
+${O}/atmega2560_rf_bridge.axf: avr/rf_bridge_common.c
 
-${O}/atmega328p_rf_bridge.axf: FREQ=16000000
 ${O}/atmega328p_rf_bridge.axf: avr/rf_bridge_uart.c
 ${O}/atmega328p_rf_bridge.axf: avr/rf_bridge_common.c
 
-rfbridge: ${O}/atmega2560_rf433_bridge.axf
+rfbridge: ${O}/atmega2560_rf_bridge.axf
 	avrdude -p m2560 -c wiring -P /dev/ttyACM0 -D -Uflash:w:$^
 
 ${O}/rf_bridged: ${wildcard src/*.c}
 	${E}echo CC ${^}
-	${E}${CC} -o $@ -MMD -std=gnu99 -Os -Ishared $^ -Wall -DMQTT -lmosquitto
+	${E}${CC} -o $@ -MMD -std=gnu99 -Os ${EXTRA_CFLAGS} $^ -Wall -DMQTT -lmosquitto
 
 
 -include ${wildcard ${O}/*.d}
