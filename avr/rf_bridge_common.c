@@ -46,6 +46,12 @@
 #include "rf_bridge_pins.h"
 #include "rf_bridge_common.h"
 
+#define STACK_DEBUG
+
+#ifdef STACK_DEBUG
+#include <string.h> // memset
+#endif
+
 #define ARRAY_SIZE(xx) (sizeof(xx)/sizeof(xx[0]))
 
 #ifdef DEBUG
@@ -68,7 +74,9 @@ enum {
 volatile uint8_t	running_state = state_SyncSearch;
 
 /* Flag: Are we displaying raw pulses, or already decoded messages */
-uint8_t display_pulses = 0;
+struct {
+	uint8_t display_pulses: 1, display_stacks: 1;
+} flags;
 
 volatile uint8_t tickcount = 0;
 
@@ -154,13 +162,16 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 	sei();
 }
 
-
+/*
+ * Some of these are made inline because flash is cheap,
+ * SRAM is not (stack space for calling them
+ */
 // overflow substraction for the counters
-uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
+inline uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2 ? 255 - v1 + v2 : v2 - v1;
 }
 // absolute value substraction for durations etc
-uint8_t abs_sub(uint8_t v1, uint8_t v2) {
+inline uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2? v1 - v2 : v2 - v1;
 }
 
@@ -224,7 +235,7 @@ void cr_syncsearch()
 			D(pin_set(pin_Debug1);)
 			msg_start = syncstart;
 
-			if (display_pulses)
+			if (flags.display_pulses)
 				running_state = state_DecodeRawPulses;
 			else if (manchester > 5)
 				running_state = state_Decoding_Manchester;
@@ -259,9 +270,7 @@ void cr_decode_ask()
 		cr_yield(0);
 
 		uint8_t pi = msg_start;
-
 		uint8_t pcount = 0;
-
 		/*
 		 * we look for 20 bits of valid data before we go ahead and
 		 * decide it's a nice message. Pointless to print garbage if it
@@ -408,63 +417,174 @@ uint8_t uart_recv()
 	return uart_rx_isempty(&uart_rx) ? 0xff : uart_rx_read(&uart_rx);
 }
 
+static uint8_t recv_match_string_P(
+		const char * w)
+{
+	uint8_t i = 0;
+	uint8_t b = pgm_read_byte(w); // we know we already matches the first one
+	while (b == pgm_read_byte(w + i)) {
+		i++;
+		if (!pgm_read_byte(w + i))
+			break;
+		b = uart_recv();
+	}
+	return b;
+}
+
+/*
+ * Return 0 if a double character hex value was decoded, otherwise,
+ * return the character that was received (or 0xff for timeout)
+ */
+static uint8_t getsbyte(uint8_t * res) {
+	uint8_t cnt = 0;
+	*res = 0;
+	while (cnt < 2) {
+		uint8_t s = uart_recv();
+		*res <<= 4;
+		if (s >= '0' && s <= '9')		*res |= s - '0';
+		else if (s >= 'a' && s <= 'f')	*res |= s - 'a' + 10;
+		else if (s >= 'A' && s < 'F')	*res |= s - 'A' + 10;
+		else return s;
+		cnt++;
+	}
+	return 0;
+}
+
+/*
+ * This is not meant to be terribly pretty, it's made to be small, use
+ * almost no sram and the minimal amount of stack. Thus the goto's
+ *
+ * I didn't want to create a 'line buffer' and a late parser; it would
+ * eat 512 bytes of SRAM as we can send 255 bits.
+ */
 void cr_receive_cmd()
 {
-	static struct {
-		uint8_t i, state;
-		const char *pfx;
-	} cmd[3] = {
-			{ .pfx = "MP:", .state = 1 },
-			{ .pfx = "PULSE", .state = 2 },
-			{ .pfx = "MSG", .state = 3 },
-	};
-
 	do {
 		cr_yield(0);
-		uint8_t state = 0, cmp = 0;
-		do {
-			uint8_t b;
-			cmp = 0;
+		uint8_t state = 0;
+		uint8_t err = 0;
+		uint8_t b = 255;
+
+		b = uart_recv();
+		if (b == 0xff)
+			goto again;
+		if (b == 'M') {
+			uint8_t msg_type = uart_recv();
+			if (msg_type == 0xff)
+				goto again;
+
+			switch (msg_type) {
+			case 'A':
+				syncduration = 0x63;	/* default ASK bit duration */
+				break;
+			case 'M':
+				syncduration = 0x40;/* default manchester clock * 2 */
+				break;
+			case 'P':
+				break;
+			default:
+				err = b;
+				goto skipline;
+			}
+			uint8_t chk = 0x55;
 			do {
 				b = uart_recv();
-				uart_putchar(b, 0);// local echo, temp?
-				for (uint8_t ci = 0; ci < ARRAY_SIZE(cmd) && !state; ci++) {
-					if (cmd[ci].i == cmp && cmd[ci].pfx[cmp] == b) {
-						cmd[ci].i++;
-						if (cmd[ci].pfx[cmd[ci].i] == 0)
-							state = cmd[ci].state;
+newkey:
+				switch(b) {
+				case ':': /* raw data */
+					do {
+						uint8_t byte;
+						// process end of message or timeout
+						if ((b = getsbyte(&byte)))
+							goto newkey;
+						// here we /know we got a valid hex value
+						switch (msg_type) {
+						case 'A':
+							break;
+						case 'M':
+							break;
+						case 'P':
+							break;
+						}
+					} while (1);
+					break;
+				case '*': /* checksum */
+					if (getsbyte(&b))
+						goto skipline;
+					if (b == chk) {
+						state++;
+						if (msg_end >= 16) {
+							transceiver_mode = mode_Idle;
+							while (transceiver_mode == mode_Transmitting) {
+								cr_yield(1);
+							}
+							/* TODO: multiple sends ? */
+						}
+						goto skipline;
+					} else {
+						err = '*';
+						goto skipline;
 					}
+					break;
+				case '!': /* pulse duration */
+					if (getsbyte(&syncduration))
+						goto skipline;
+					chk += syncduration;
+					break;
+				case '#': /* number of bits total */
+					if (getsbyte(&bcount))
+						goto skipline;
+					chk += bcount;
+					break;
+				default:
+					err = b;
+					goto skipline;
 				}
-				cmp++;
-			} while (b >= ' ' && b != 0xff && !state && cmp < 24);
-			for (uint8_t ci = 0; ci < ARRAY_SIZE(cmd) && !state; ci++)
-				cmd[ci].i = 0;
-			uint8_t err = b == 255;
-			switch (state) {
-				case 1: {
-
-				}	break;
-				case 2: {
-					display_pulses = 1; err = 0;
-				}	break;
-				case 3: {
-					display_pulses = 0; err = 0;
-				}	break;
-			}
-			if (err) printf_P(PSTR("!%d\n"), err);
-			else if (state) printf_P(PSTR("*OK\n"));
-			break;
-		} while (1);
+			} while (1);
+		} else if (b == 'P') {
+			if ((b = recv_match_string_P(PSTR("PULSE\n"))) == '\n') {
+				flags.display_pulses = 1;
+				state++;
+			} else
+				err = b;
+		} else if (b == 'D') {
+			if ((b = recv_match_string_P(PSTR("DEMOD\n"))) == '\n') {
+				flags.display_pulses = 0;
+				state++;
+			} else
+				err = b;
+		}
+#ifdef STACK_DEBUG
+		else if (b == 'S') {
+			if ((b = recv_match_string_P(PSTR("STACK\n"))) == '\n') {
+				flags.display_stacks = 1;
+				state++;
+			} else
+				err = b;
+		}
+#endif
+skipline:
+		/* wait for end of line (if not already in 'b'), or timeout */
+		while (b >= ' ' && b != 0xff)
+			b = uart_recv();
+		if (err) printf_P(PSTR("!%d\n"), err);
+		else if (state) printf_P(PSTR("*OK\n"));
+again:
 		running_state = state_SyncSearch;
 		msg_start = msg_end = current_pulse = 0;
 	} while (1);
 }
 
-AVR_TASK(syncsearch, 64);
-AVR_TASK(decode_ask, 64);
-AVR_TASK(decode_manchester, 96);
-AVR_TASK(decode_pulses, 64);
-AVR_TASK(receive_cmd, 96);
+/*
+ * use the STACK command to dump the usage of the stacks, if
+ * you have enabled STACK_DEBUG. The stacks are trimmed to the minimum
+ * needed, so any strange behaviour should be looked at here, first
+ */
+AVR_TASK(syncsearch, 48);
+AVR_TASK(decode_ask, 90);
+AVR_TASK(decode_manchester, 108);
+AVR_TASK(decode_pulses, 48);
+AVR_TASK(receive_cmd, 96*2);
 
 void rf_bridge_run()
 {
@@ -476,6 +596,14 @@ void rf_bridge_run()
 
 	sei();
 	printf_P(PSTR("* Starting RF Firmware\n"));
+
+#ifdef STACK_DEBUG
+	memset(syncsearch.stack, 0xff, sizeof(syncsearch.stack));
+	memset(decode_ask.stack, 0xff, sizeof(decode_ask.stack));
+	memset(decode_manchester.stack, 0xff, sizeof(decode_manchester.stack));
+	memset(decode_pulses.stack, 0xff, sizeof(decode_pulses.stack));
+	memset(receive_cmd.stack, 0xff, sizeof(receive_cmd.stack));
+#endif
 
 	/* start coroutines on their own stacks */
 	cr_start(syncsearch, cr_syncsearch);
@@ -505,7 +633,7 @@ void rf_bridge_run()
 				chk += bcount;
 				chk += syncduration;
 				if (bcount)
-					printf_P(PSTR(":%02x!%0x*%02x\n"),
+					printf_P(PSTR("#%02x!%0x*%02x\n"),
 							bcount, syncduration, chk);
 				running_state = state_SyncSearch;
 				msg_end = 0;
@@ -515,5 +643,24 @@ void rf_bridge_run()
 				cr_resume(receive_cmd);
 			}	break;
 		}
+
+#ifdef STACK_DEBUG
+		if (flags.display_stacks) {
+			flags.display_stacks = 0;
+
+			uint16_t i;
+			uint16_t max;
+#define print_stack(_name) \
+			max = sizeof(_name).stack;\
+			for (i = 0; i < max && _name.stack[i] == 0xff; i++) ; \
+			printf_P(PSTR(#_name " %d/%d\n"), max-i, max);
+
+			print_stack(syncsearch);
+			print_stack(decode_ask);
+			print_stack(decode_manchester);
+			print_stack(decode_pulses);
+			print_stack(receive_cmd);
+		}
+#endif
 	}
 }

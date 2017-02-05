@@ -8,7 +8,8 @@
 #ifndef ARDUIDIOT_H_
 #define ARDUIDIOT_H_
 
-/* this file allow access to pins with a single number, instead of a 
+/*
+ * This file allow access to pins with a single number, instead of a
  * pair of port/bit; it uses the arduino pin numbers, and it's main
  * advantages is that it's all preprocessor based, therefore if you
  * use constants as parameter for the macros, they will resolve as
@@ -55,7 +56,7 @@ typedef struct ardupin_t {
 #endif
 
 #ifndef _PORT_BASE
-#error Invalid part, make sure to add mapping for this one
+#error Invalid AVR part, make sure to add mapping/alias for this one
 #endif
 
 
