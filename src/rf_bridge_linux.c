@@ -285,11 +285,25 @@ static uint8_t getsbyte(const char * s) {
 	return res;
 }
 
+typedef struct msg_match_t {
+	struct msg_match_t *next;
+	uint8_t * data;
+	uint8_t bitcount;
+
+	const char * msg;
+	char *mqtt_path;
+	int 	mqtt_qos : 4, lineno;
+	char *mqtt_pload;
+	char _data[];
+} msg_match_t;
+
 int main(int argc, const char *argv[])
 {
-	const char *input = NULL;
+	const char *serial_path = NULL;
 	const char *mqtt_hostname = NULL;
-	const char *mqtt_pass = NULL;
+	const char *mqtt_password = NULL;
+	const char *mapping_path = NULL;
+	char line[1024];
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-h") && i < (argc-1)) {
@@ -297,22 +311,80 @@ int main(int argc, const char *argv[])
 		} else if (!strcmp(argv[i], "-r") && i < (argc-1)) {
 			mqtt_path = argv[++i];
 		} else if (!strcmp(argv[i], "-p") && i < (argc-1)) {
-			mqtt_pass = argv[++i];
-		} else if (!input)
-			input = argv[i];
+			mqtt_password = argv[++i];
+		} else if (!strcmp(argv[i], "-m") && i < (argc-1)) {
+			mapping_path = argv[++i];
+		} else if (!serial_path)
+			serial_path = argv[i];
 		else {
 			fprintf(stderr, "%s invalid argument %s\n", argv[0], argv[i]);
 			exit(1);
 		}
 	}
+	if (argc == 1 || !serial_path) {
+		fprintf(stderr,
+				"%s: [-h <mqtt_hostname>] [-p <mtqq_password>] "
+				"[-r <mqtt root name>] [-m <message mapping filename] "
+				"<serial port device file>",
+				argv[0]);
+		exit(1);
+	}
+	if (mapping_path) {
+		FILE *mf = fopen(mapping_path, "r");
+		int linecount = 0;
+		if (!mf) {
+			perror(mapping_path);
+			exit(1);
+		}
+		while (fgets(line, sizeof(line), mf)) {
+			linecount++;
+			// strip empty lines, comments
+			while (*line && line[strlen(line)-1] <= ' ')
+				line[strlen(line)-1] = 0;
+			char * l = line;
+			while (*l == ' ' || *l == '\t')
+				l++;
+			if (!*l || *l == '#') continue;
 
+			const char * msg = strsep(&l, " \t");
+			const char * mqtt_path = strsep(&l, " \t");
+			const char * mqtt_qos = strsep(&l, " \t");
+			const char * mqtt_pload = strsep(&l, " \t");
+
+			if (!msg || msg[0] != 'M' || (msg[1] != 'A' && msg[1] != 'M')) {
+				fprintf(stderr, "%s:%d invalid message format\n",
+						mapping_path, linecount);
+				continue;
+			}
+			if (!mqtt_path) {
+				fprintf(stderr, "%s:%d missing MQTT path\n",
+						mapping_path, linecount);
+				continue;
+			}
+
+			int size = strlen(msg) + 1 + strlen(mqtt_path) + 1 +
+					(mqtt_pload ? strlen(mqtt_pload + 1) : 0) +
+					sizeof (msg_match_t);
+			msg_match_t *m = calloc(1, size);
+			char *d = m->_data;
+			strcpy(d, msg); m->msg = d; d+= strlen(d) + 1;
+			strcpy(d, mqtt_path); m->mqtt_path = d; d+= strlen(d) + 1;
+			if (mqtt_pload) {
+				strcpy(d, mqtt_pload); m->mqtt_pload = d; d+= strlen(d) + 1;
+			}
+			if (mqtt_qos)
+				m->mqtt_qos = atoi(mqtt_qos);
+			m->lineno = linecount;
+		}
+		fclose(mf);
+	}
 #ifdef MQTT
 	if (!mqtt_hostname)
 		mqtt_hostname = getenv("MQTT");
 	if (!mqtt_hostname)
 		mqtt_hostname = getenv("MQTT_HOST");
-	if (!mqtt_pass)
-		mqtt_pass = getenv("MQTT_PASS");
+	if (!mqtt_password)
+		mqtt_password = getenv("MQTT_PASS");
 
 	if (mqtt_hostname) {
 		mosquitto_lib_init();
@@ -326,8 +398,8 @@ int main(int argc, const char *argv[])
 		if (!mqtt_path)
 			mqtt_path = hn;	// safe, we don't return anytime soon
 		// CHANGE
-		if (mqtt_pass)
-			mosquitto_username_pw_set(mosq, hn, mqtt_pass);
+		if (mqtt_password)
+			mosquitto_username_pw_set(mosq, hn, mqtt_password);
 
 		int rc = mosquitto_connect_async(mosq, mqtt_hostname, 1883, 60);
 		if (rc) {
@@ -347,20 +419,18 @@ int main(int argc, const char *argv[])
 	{
 		const char * stty =
 			"stty -clocal -icanon -hupcl -cread -opost -echo <%s >/dev/null 2>&1";
-		char * d = malloc(strlen(stty) + strlen(input) + 10);
+		char * d = malloc(strlen(stty) + strlen(serial_path) + 10);
 
-		sprintf(d, stty, input);
+		sprintf(d, stty, serial_path);
 		printf("%s\n", d);
 		system(d);
 	}
-	FILE * f = fopen(input, "r");
-	char line[1024];
-
+	FILE * f = fopen(serial_path, "r");
 	if (!f) {
-		perror(input);
+		perror(serial_path);
 		exit(1);
 	}
-	while (f && fgets(line, sizeof(line), f)) {
+	while (fgets(line, sizeof(line), f)) {
 		// strip line
 		while (*line && line[strlen(line)-1] <= ' ')
 			line[strlen(line)-1] = 0;

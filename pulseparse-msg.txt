@@ -1,14 +1,20 @@
 
-MA:4055c300:19	switch/reading "on":true
-MA:4055cc00:19	switch/reading "on":false
+# We send two messages when getting the said bit strings
+# One to set a 'state' with QOS 2 (keep it) and one as a fire event
+# with QoS 0 for notification.
 
-MA:405d0300:19	switch/audi "on":true
-MA:40550000:19	switch/audi "on":true
-MA:405d0c00:19	switch/audi "on":false
+MA:4055c300#19	switch/reading 2 "on":true
+MA:4055c300#19	switch/reading/on 0
+MA:4055cc00#19	switch/reading 2 "on":false
+MA:4055cc00#19	switch/reading/off 0
 
-MA:40553300:19	switch/bar "on":true
-MA:40553c00:19	switch/bar "on":false
+MA:405d0300#19	switch/audi 2 "on":true
+MA:40550000#19	switch/audi 2 "on":true
+MA:405d0c00#19	switch/audi 2 "on":false
 
-MA:3d65e400:19	switch/office "on":true
-MA:3d65e200:19	switch/office "on":false
+MA:40553300#19	switch/bar 2 "on":true
+MA:40553c00#19	switch/bar 2 "on":false
+
+MA:3d65e400#19	switch/office 2 "on":true
+MA:3d65e200#19	switch/office 2 "on":false
 	
