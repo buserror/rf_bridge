@@ -1,29 +1,42 @@
 
-This project implements a RF bridge for 433Mhz devices. The idea is to have a small AVR do the mod/demod and send diggested messasges on it's serial port to a linux box for processing; in this case bridging sensors and switches to a MQTT broker.
+This project implements a RF bridge for 433Mhz devices. The idea is to have a small AVR do the mod/demod and send diggested messages on it's serial port to a linux box for processing; in this case bridging sensors and switches to a MQTT broker.
 
-This was made to interface my cheap RF433 gizmoz (wall switches, outlets etc) to the home automation, and ultimately the Amazon echo.
+This was made to interface my cheap RF433 gizmoz (wall switches, outlets, temperature sensors etc) to the home automation, and ultimately the Amazon echo/Alexa.
 
-The fact the AVR does all the sensitive bits means the linux program doesn't eat a lot of CPU and can concentrate on the applicative parts.
+The fact the AVR does all the sensitive bits means the linux program doesn't eat a lot of CPU and can concentrate on the applicative parts, which is the MQTT bridging.
 
 ## The AVR Bits
-The firmware can run on anything with about 2KB of SRAM, and a clock of 16Mhz. The firmware 'samples' the RF signal from the 433 module at about 64khz and tries to detect edges, then regular pulses, then does some decoding until a 'long low pulse', and forwards it on.
+The firmware can run on anything with about 2KB of SRAM (currently uses ~1300 bytes), and a clock of 16Mhz. The firmware 'samples' the RF signal from the 433 module at about 64khz and tries to detect edges, then regular pulses, then does some decoding until a 'long low pulse', and forwards it on.
 
 The firmware can also transmit (altho this part isn't finished) using the same message format. The code doesn't try to be too clever and has a 'raw' mode it can be switches into to forward raw pulses straight to the host for analysis. 
 
-The firmware is capable of decoding both frequency based modulation and manchester encoding. It's completely frequency/pattern independent and continuously search for signal in the noise before applying some filtering and hopefully forward the whole diggested message onward.
+The firmware is capable of decoding both Amplitude-Shift Keying (ASK) and manchester encoding. It's completely frequency/pattern independent and continuously search for signal in the noise before applying some filtering and hopefully forward the whole diggested message onward.
+
+Also, I wanted to publish a firmware that looks marketedly different from the typical arduidiot[0] firmware that is all bloaty, synchronous and so on. This firmware uses coroutines, is completely asynchronous and allows the AVR to be in sleep mode most of the time.
+
+[0]: Arduidiot is my name for the well known boards. Since a few years back when they started suing each others for the name, I decided my version of the name was a lot more appropriate.
 
 ### Message format
 A Typical message will be sent to the host like this, for a dumb switch:
 
-    MA:40553300:19*36!2f
+    MA:40553300#19!3f*36
 
-This is a message that already has been decoded as having frequency based encoding, has 0x19 bits, the clock duration was 0x2f timer clock cycle per bit, and the checksum was 0x36.
+This is a message that already has been decoded as ASK encoding, has 0x19 bits, the clock duration was 0x2f timer clock cycle per bit, and the checksum was 0x36.
 
 A more involved message woudl be:
 
-        MM:0028b4206b0b38c0:40*ff!3f
+    MM:0028b4206b0b38c0#40!3f*ff
 
 This one has 'M'ancester encoding, 0x40 bits with 0x3f/2 timer ticks per bits.
 
 The reason the timer clock is returned is to be able to reply the message back. More on this later.
 
+## The Linux Bits
+The linux bit sits on the serial port, reads diggested messages and 'maps' them to MQTT messages. For dumb on/off switches it uses a file containing the mapping; but there is an extra decoder for the temperature/humidity sensor.
+
+The linux process uses libmosquitto to connect to a broker. I might try to do away with the libmosquitto requirement, as I don't think I need all the features (and footprint) it brings. I just need a unsecured connection to a broker, and let the broker be 'clever' and do encryption bridging if needs be.
+
+## The Hardware Bits
+Need to finish that -- currently uses an Arduino Mega and a RF433 receiver + transmitter. I *plan* to share the antenna, knowing it's probably not a very good idea -- we'll see how that works in the long run. It otherwises requires no extra hardware. The only thing I did was add a 100Ohm resistor in series with the receiver output, as I was seeing a lot of ringing on the oscilloscope.
+
+The 'real' hardware will be an Arduino nano v3.0 with an Atmega 328p. Powered via the USB port. More on that later.
