@@ -50,7 +50,9 @@ rfbridge: ${O}/atmega2560_rf_bridge.axf
 
 ${O}/rf_bridged: ${wildcard src/*.c}
 	${E}echo CC ${^}
-	${E}${CC} -o $@ -MMD -std=gnu99 -Os ${EXTRA_CFLAGS} $^ -Wall -DMQTT -lmosquitto
+	${E}${CC} -o $@ -MMD -std=gnu99 -Og ${EXTRA_CFLAGS} \
+		$^ -Wall \
+		-DMQTT -lmosquitto
 
 
 -include ${wildcard ${O}/*.d}

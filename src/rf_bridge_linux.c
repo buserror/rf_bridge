@@ -14,7 +14,6 @@
 #include <unistd.h>
 
 struct mosquitto *mosq = NULL;
-const char *mqtt_path = NULL;
 
 struct {
 	const char *name;
@@ -24,6 +23,9 @@ struct {
 		[2].name = "lab",
 };
 #endif
+
+const char *mqtt_path = NULL;
+
 
 unsigned debug_sync;
 
@@ -285,17 +287,24 @@ static uint8_t getsbyte(const char * s) {
 	return res;
 }
 
+typedef struct msg_t {
+	uint8_t		msg[256/8];
+	uint8_t		bcount;
+	unsigned	manchester: 1;
+} msg_t;
+
 typedef struct msg_match_t {
 	struct msg_match_t *next;
-	uint8_t * data;
-	uint8_t bitcount;
+	msg_t		msg;
 
-	const char * msg;
-	char *mqtt_path;
-	int 	mqtt_qos : 4, lineno;
-	char *mqtt_pload;
-	char _data[];
+	const char * 	msg_txt;
+	char *		mqtt_path;
+	int 		mqtt_qos : 4, lineno;
+	char *		mqtt_pload;
+	char 		_data[];
 } msg_match_t;
+
+msg_match_t * matches = NULL;
 
 int main(int argc, const char *argv[])
 {
@@ -325,7 +334,7 @@ int main(int argc, const char *argv[])
 		fprintf(stderr,
 				"%s: [-h <mqtt_hostname>] [-p <mtqq_password>] "
 				"[-r <mqtt root name>] [-m <message mapping filename] "
-				"<serial port device file>",
+				"<serial port device file>\n",
 				argv[0]);
 		exit(1);
 	}
@@ -350,7 +359,7 @@ int main(int argc, const char *argv[])
 			const char * mqtt_path = strsep(&l, " \t");
 			const char * mqtt_qos = strsep(&l, " \t");
 			const char * mqtt_pload = strsep(&l, " \t");
-
+printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 			if (!msg || msg[0] != 'M' || (msg[1] != 'A' && msg[1] != 'M')) {
 				fprintf(stderr, "%s:%d invalid message format\n",
 						mapping_path, linecount);
@@ -363,11 +372,11 @@ int main(int argc, const char *argv[])
 			}
 
 			int size = strlen(msg) + 1 + strlen(mqtt_path) + 1 +
-					(mqtt_pload ? strlen(mqtt_pload + 1) : 0) +
+					(mqtt_pload ? strlen(mqtt_pload) + 1 : 0) +
 					sizeof (msg_match_t);
 			msg_match_t *m = calloc(1, size);
 			char *d = m->_data;
-			strcpy(d, msg); m->msg = d; d+= strlen(d) + 1;
+			strcpy(d, msg); m->msg_txt = d; d+= strlen(d) + 1;
 			strcpy(d, mqtt_path); m->mqtt_path = d; d+= strlen(d) + 1;
 			if (mqtt_pload) {
 				strcpy(d, mqtt_pload); m->mqtt_pload = d; d+= strlen(d) + 1;
@@ -375,6 +384,10 @@ int main(int argc, const char *argv[])
 			if (mqtt_qos)
 				m->mqtt_qos = atoi(mqtt_qos);
 			m->lineno = linecount;
+
+			if (matches)
+				m->next = matches;
+			matches = m;
 		}
 		fclose(mf);
 	}
@@ -397,7 +410,7 @@ int main(int argc, const char *argv[])
 
 		if (!mqtt_path)
 			mqtt_path = hn;	// safe, we don't return anytime soon
-		// CHANGE
+		// TODO: CHANGE? login default to hostname
 		if (mqtt_password)
 			mosquitto_username_pw_set(mosq, hn, mqtt_password);
 
@@ -424,6 +437,7 @@ int main(int argc, const char *argv[])
 		sprintf(d, stty, serial_path);
 		printf("%s\n", d);
 		system(d);
+		free(d);
 	}
 	FILE * f = fopen(serial_path, "r");
 	if (!f) {
@@ -436,7 +450,7 @@ int main(int argc, const char *argv[])
 			line[strlen(line)-1] = 0;
 		if (!*line) continue;
 		printf("%s\n", line);
-		
+
 		int pulsecount = 0;
 		char * cur = line + 3;
 		uint8_t inchk = 0x55;
