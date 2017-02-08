@@ -288,20 +288,21 @@ static uint8_t getsbyte(const char * s) {
 }
 
 typedef struct msg_t {
-	uint8_t		msg[256/8];
-	uint8_t		bcount;
-	unsigned	manchester: 1;
+	uint32_t	pulses: 1, type: 7, chk: 8, count;
+	uint32_t	pulse_duration: 8, checksum_valid: 1;
+	uint8_t		msg[256/8];	// minimum size for non-pulses messages
 } msg_t;
+
 
 typedef struct msg_match_t {
 	struct msg_match_t *next;
-	msg_t		msg;
+	msg_t			msg;
+	int 			mqtt_qos : 4, lineno;
 
 	const char * 	msg_txt;
-	char *		mqtt_path;
-	int 		mqtt_qos : 4, lineno;
-	char *		mqtt_pload;
-	char 		_data[];
+	const char *	mqtt_path;
+	const char *	mqtt_pload;
+	char 			_data[];
 } msg_match_t;
 
 msg_match_t * matches = NULL;
@@ -450,6 +451,15 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 			line[strlen(line)-1] = 0;
 		if (!*line) continue;
 		printf("%s\n", line);
+
+		if (*line == '#')
+			continue;
+
+		union {
+			msg_t m;
+			uint8_t filler[sizeof(msg_t) + (512 - (256/8))];
+		} u;
+		memset(u.filler, 0, sizeof(u.filler));
 
 		int pulsecount = 0;
 		char * cur = line + 3;
