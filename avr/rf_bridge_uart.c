@@ -69,7 +69,8 @@ int uart_putchar(char c, FILE *stream)
 		uart_putchar('\r', stream);
 	while (uart_tx_isfull(&uart_tx)) {
 		UCSR0B |= (1 << UDRIE0); // make sure we don't stall
-		cr_yield(1);
+		if (cr_current)
+			cr_yield(1);
 	}
 	uart_tx_write(&uart_tx, c);
 	UCSR0B |= (1 << UDRIE0);

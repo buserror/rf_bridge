@@ -122,7 +122,8 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 		case mode_Receiving: {
 			/* debouncing, wait until we got clear levels to
 			 * change the real 'bit' value */
-			uint8_t b = pin_get(pin_Receiver);
+			static uint8_t b;
+			b = pin_get(pin_Receiver);
 			shifter = (shifter << 1) | b;
 			if ((shifter & 0x07) == 0x07)
 				b = 1;
@@ -167,11 +168,11 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
  * SRAM is not (stack space for calling them
  */
 // overflow substraction for the counters
-inline uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
+static uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2 ? 255 - v1 + v2 : v2 - v1;
 }
 // absolute value substraction for durations etc
-inline uint8_t abs_sub(uint8_t v1, uint8_t v2) {
+static uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2? v1 - v2 : v2 - v1;
 }
 
@@ -179,6 +180,7 @@ inline uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 uint8_t syncduration = 0;
 uint8_t chk = 0, byte = 0;
 uint8_t bcount = 0;
+uint8_t msg_type = 'P';
 
 /*
  * stuff the next bit in the 8 bits buffer, and output it when full.
@@ -202,7 +204,7 @@ static void stuffbit(uint8_t b, uint8_t last) {
  * at least 8 of them like that, while ASK will always be at least
  * 8 bits anyway, so it's a good discriminant
  */
-void cr_syncsearch()
+AVR_CR(cr_syncsearch)
 {
 	uint8_t pi = current_pulse;
 	uint8_t syncstart = 0;
@@ -264,7 +266,7 @@ void cr_syncsearch()
  * After we got a sync, and it's been decided it's ASK, go on
  * and do the decoding on the fly until and end of pulse
  */
-void cr_decode_ask()
+AVR_CR(cr_decode_ask)
 {
 	do {
 		cr_yield(0);
@@ -292,7 +294,9 @@ void cr_decode_ask()
 		 */
 		if (pcount == 20) {
 			pi = msg_start;	/* restart at beginning */
-			printf_P(PSTR("MA:"));
+			uart_putchar('M', 0);
+			uart_putchar('A', 0);
+			uart_putchar(':', 0);
 			D(pin_set_to(pin_Debug3, 0);)
 			do {
 				// wait for bits
@@ -318,13 +322,15 @@ void cr_decode_ask()
  * After we got a sync, and it's been decided it's basic encoding, go on
  * and do the decoding on the fly until and end of pulse
  */
-void cr_decode_manchester()
+AVR_CR(cr_decode_manchester)
 {
 	do {
 		cr_yield(0);
 
 		uint8_t pi = msg_start;
-		printf_P(PSTR("MM:"));
+		uart_putchar('M', 0);
+		uart_putchar('M', 0);
+		uart_putchar(':', 0);
 
 		// We know what a half pulse is, it's synclen / 2
 		uint8_t bit = 0, phase = 1;
@@ -375,7 +381,7 @@ void cr_decode_manchester()
  * Raw print of the pulses. Used for debug and in 'learning mode'
  * for remotes, buttons and so forth.
  */
-void cr_decode_pulses()
+AVR_CR(cr_decode_pulses)
 {
 	do {
 		cr_yield(0);
@@ -435,7 +441,9 @@ static uint8_t recv_match_string_P(
  * Return 0 if a double character hex value was decoded, otherwise,
  * return the character that was received (or 0xff for timeout)
  */
-static uint8_t getsbyte(uint8_t * res) {
+static uint8_t getsbyte(
+		uint8_t * res )
+{
 	uint8_t cnt = 0;
 	*res = 0;
 	while (cnt < 2) {
@@ -457,14 +465,16 @@ static uint8_t getsbyte(uint8_t * res) {
  * I didn't want to create a 'line buffer' and a late parser; it would
  * eat 512 bytes of SRAM as we can send 255 bits.
  */
-void cr_receive_cmd()
+AVR_CR(cr_receive_cmd)
 {
 	do {
 		cr_yield(0);
 		uint8_t state = 0;
 		uint8_t err = 0;
-		uint8_t b = 255;
+		static uint8_t b;
+		static uint8_t byte;
 
+		b = 255;
 		b = uart_recv();
 		if (b == 0xff)
 			goto again;
@@ -489,11 +499,11 @@ void cr_receive_cmd()
 			uint8_t chk = 0x55;
 			do {
 				b = uart_recv();
+
 newkey:
 				switch(b) {
 				case ':': /* raw data */
 					do {
-						uint8_t byte;
 						// process end of message or timeout
 						if ((b = getsbyte(&byte)))
 							goto newkey;
@@ -540,6 +550,7 @@ newkey:
 					err = b;
 					goto skipline;
 				}
+				break;
 			} while (1);
 		} else if (b == 'P') {
 			if ((b = recv_match_string_P(PSTR("PULSE\n"))) == '\n') {
@@ -585,6 +596,8 @@ AVR_TASK(decode_ask, 90);
 AVR_TASK(decode_manchester, 108);
 AVR_TASK(decode_pulses, 48);
 AVR_TASK(receive_cmd, 96*2);
+
+void rf_bridge_run() __attribute__((noreturn)) __attribute__((naked));
 
 void rf_bridge_run()
 {

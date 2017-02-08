@@ -56,6 +56,8 @@ AVR_MCU(F_CPU, "atmega328p");
 
 extern FILE mystdout;
 
+int main() __attribute__((naked));
+
 int main()
 {
 	stdout = &mystdout;

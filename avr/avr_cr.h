@@ -87,9 +87,11 @@ void cr_yield(uint8_t _sleep);
 #ifdef CR_MAIN
 jmp_buf	cr_caller;
 avr_cr * cr_current = 0, * cr_head = 0;
+
+void cr_yield(uint8_t _sleep);// __attribute__((noreturn)) __attribute__((naked));
+
 void cr_yield(uint8_t _sleep)
 {
-	if (!cr_current) return;
 	cr_current->running = !_sleep;
 	if (!setjmp(cr_current->jmp))
 		longjmp(cr_caller, 1);
@@ -98,6 +100,11 @@ void cr_yield(uint8_t _sleep)
 extern jmp_buf	cr_caller;
 extern avr_cr * cr_current, * cr_head;
 #endif
+
+#define AVR_CR(_name) \
+	void _name(void) __attribute__((noreturn)) __attribute__((naked));\
+	void _name(void)
+
 /*
  * Declares the runtime structure needed for a task, as
  * well as space for it's stack.

@@ -56,6 +56,8 @@ AVR_MCU(F_CPU, "atmega2560");
 
 extern FILE mystdout;
 
+int main() __attribute__((naked));
+
 int main()
 {
 	stdout = &mystdout;
