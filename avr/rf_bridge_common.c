@@ -591,11 +591,11 @@ again:
  * you have enabled STACK_DEBUG. The stacks are trimmed to the minimum
  * needed, so any strange behaviour should be looked at here, first
  */
-AVR_TASK(syncsearch, 48);
-AVR_TASK(decode_ask, 90);
+AVR_TASK(syncsearch, 48 * 2);
+AVR_TASK(decode_ask, 108);
 AVR_TASK(decode_manchester, 108);
-AVR_TASK(decode_pulses, 48);
-AVR_TASK(receive_cmd, 96*2);
+AVR_TASK(decode_pulses, 48 * 2);
+AVR_TASK(receive_cmd, 96 * 2);
 
 void rf_bridge_run() __attribute__((noreturn)) __attribute__((naked));
 

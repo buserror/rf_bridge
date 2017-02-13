@@ -24,12 +24,10 @@ struct {
 };
 #endif
 
-const char *mqtt_path = NULL;
+const char *mqtt_path = "mqtt";
 
 
 unsigned debug_sync;
-
-uint8_t pulse[256][2];
 
 // overflow substraction for the counters
 uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
@@ -40,47 +38,94 @@ uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2? v1 - v2 : v2 - v1;
 }
 
-// easy as pie here
-uint8_t msg[256/8];
-uint8_t bcount = 0;
-uint8_t chk = 0;
-
-
 typedef struct msg_t {
-	uint32_t	pulses: 1, type: 7, chk: 8, bitcount;
-	uint32_t	pulse_duration: 8, checksum_valid: 1, bytecount;
+	uint32_t		pulses: 1, decoded: 1, type: 7, chk: 8, bitcount;
+	uint32_t		pulse_duration: 8, checksum_valid: 1,
+				max_size : 11, bytecount;
 	uint8_t		msg[0];
 } msg_t, *msg_p;
 
+typedef union {
+	msg_t m;
+	uint8_t filler[sizeof(msg_t) + 512];
+} msg_full_t;
+
 
 /* Add a bit to the buffer, update the checksum */
-static inline void stuffbit(uint8_t b) {
-	uint8_t bn = bcount % 8;
-	msg[bcount / 8] |= b << (7 - bn);
-	bcount++;
+static void
+msg_stuffbit(
+		msg_p m,
+		uint8_t b)
+{
+	uint8_t bn = m->bitcount % 8;
+	m->msg[m->bitcount / 8] |= b << (7 - bn);
+	m->bitcount++;
 	if (bn == 7) {
-		chk += msg[(bcount - 1) / 8];
-		msg[bcount / 8] = 0;
+		m->chk += m->msg[(m->bitcount - 1) / 8];
+		m->msg[m->bitcount / 8] = 0;
 	}
+	m->bytecount = 1 + (m->bitcount / 8);
 }
 
 /* Shift the whole buffer right or left, depending */
-static void shift_buffer(int8_t shift) {
-	uint16_t *ml = (uint16_t*)msg;
+static void
+msg_shift(
+		msg_p m,
+		int8_t shift) {
+	uint16_t *ml = (uint16_t*)m->msg;
+	uint8_t size = m->bytecount;
 
-	for (uint8_t i = 0; i < (256 / (sizeof(ml[0]) * 8)); i++) {
+	for (uint8_t i = 0; i < size; i++) {
 		uint16_t w0 = ntohs(ml[i]);
 		uint16_t w1 = i < ((256 / 32) - 1) ? ntohs(ml[i + 1]) : 0;
 		uint16_t w = (w0 << (8 - shift)) | (w1 >> (8 + shift));
 		ml[i] = htons(w);
 	}
 	/* adjust bit counts if we add/removed any */
-	bcount = bcount - shift;
+	m->bitcount = m->bitcount - shift;
+}
+
+msg_p
+msg_init(
+		msg_p m,
+		uint8_t type)
+{
+	if (!m)
+		return NULL;
+	m->chk = 0x55;
+	m->type = type;
+	m->pulses = type == 'P';
+	m->bitcount = m->bytecount = 0;
+	m->pulse_duration = m->checksum_valid = 0;
+	m->msg[0] = 0;
+	return m;
+}
+
+void
+msg_display(
+		msg_p m,
+		const char * pfx)
+{
+	uint8_t chk = 0x55;
+	printf("%s%sM%c", pfx ? pfx : "", pfx && *pfx ? " " : "", m->type);
+	if (m->pulse_duration) printf("!%02x", m->pulse_duration);
+	printf(":");
+	for (uint8_t i = 0; i < (m->bitcount + 7) / 8; i++) {
+		printf("%02x", m->msg[i]);
+		chk += m->msg[i];
+	}
+	chk += m->bitcount;
+	chk += m->pulse_duration;
+	printf("#%02x*%02x\n", m->bitcount, chk);
 }
 
 /* Ambient Weather F007th */
 /* details are at https://forum.arduino.cc/index.php?topic=214436.15 */
-static uint8_t weather_chk(const uint8_t *buff, uint8_t length) {
+static uint8_t
+weather_chk(
+		const uint8_t *buff,
+		uint8_t length)
+{
 	uint8_t mask = 0x7C;
 	uint8_t checksum = 0x64;
 
@@ -102,7 +147,11 @@ static uint8_t weather_chk(const uint8_t *buff, uint8_t length) {
 	return checksum;
 }
 
-static void weather_decode() {
+static void
+weather_decode(
+		msg_p m)
+{
+	uint8_t * msg = m->msg;
 	uint8_t chk = weather_chk(msg + 1, 5);
 	int temp = ((msg[3] & 0x7) << 8) | msg[4];
 	temp -= 400 + 320;
@@ -151,7 +200,8 @@ uint8_t manchester = 0;
 
 void
 decoder(
-		msg_p m)
+		msg_p m,
+		msg_p o)
 {
 	uint8_t end = m->bytecount;
 	uint8_t start = 0;
@@ -163,7 +213,7 @@ decoder(
 	manchester = 0;
 
 	typedef uint8_t pulse_t[2];
-	pulse_t *pulse = m->msg;
+	pulse_t *pulse = (pulse_t *)m->msg;
 
 	/* this piece scans the pulse stream for some sort of synchronization.
 	 * typically 4 pulses of roughly equal length. When found, the phases
@@ -198,14 +248,15 @@ decoder(
 		printf("MN:%d\n", ovf_sub(start, end));
 		return;
 	}
-	bcount = 0;
-	msg[0] = 0;
-	chk = 0x55;
+	msg_init(o, manchester ? 'M' : 'A');
+	o->pulse_duration = syncduration;
+	o->decoded = 1;
+
 	if (!manchester) {
 		pi = syncstart;
 		while (pi != end) {
 			uint8_t bit = pulse[pi][1] > pulse[pi][0];
-			stuffbit(bit);
+			msg_stuffbit(o, bit);
 			pi++;
 		}
 	} else {
@@ -217,7 +268,7 @@ decoder(
 		uint8_t bit = 0, phase = 1;
 		uint8_t demiclock = 0;
 		uint8_t stuffclock = 0;
-		uint8_t margin = syncduration / 4;
+		uint8_t margin = o->pulse_duration / 4;
 
 		/*
 		 * Could demi-clocks; stuff the current bit value at each cycles,
@@ -227,7 +278,7 @@ decoder(
 		while (pi != end) {
 			if (stuffclock != demiclock) {
 				if (stuffclock & 1)
-					stuffbit(bit);
+					msg_stuffbit(o, bit);
 				stuffclock++;
 			}
 			// if the phase is double the demiclock, change polarity
@@ -238,7 +289,7 @@ decoder(
 			demiclock++;
 			if (stuffclock != demiclock) {
 				if (stuffclock & 1)
-					stuffbit(bit);
+					msg_stuffbit(o, bit);
 				stuffclock++;
 			}
 
@@ -248,13 +299,16 @@ decoder(
 	}
 }
 
-void display() {
-	if (bcount >= 64) {
+static void
+display(
+		msg_p m )
+{
+	if (m->bitcount >= 64) {
 		// look for weather sensor
 
 		/* idea here is to shift the header around to try to find the constant
 		 * header, and if found, we offset the whole buffer to match */
-		uint16_t *ml = (uint16_t*)msg;
+		uint16_t *ml = (uint16_t*)m->msg;
 		int shift = 0;
 		for (int i = 0; i < 8; i++, shift++) {
 			uint32_t w = (ntohs(ml[0]) << (8 - shift)) |
@@ -262,34 +316,25 @@ void display() {
 
 			if (w == 0x0145) {
 				// weather station message is shifted by that amount
-				shift_buffer(shift);
+				msg_shift(m, shift);
 
 			//	printf("Weather %08x shift %d bcount %d\n", w, shift, bcount);
-				weather_decode();
+				weather_decode(m);
 				break;
 			}
 		}
 	}
-#if 0
-	if (bcount < 16)
-		return;
-	chk = 0x55;
-	printf("%s:", manchester ? "MM" : "MA");
-	for (uint8_t i = 0; i < (bcount + 7) / 8; i++) {
-		printf("%02x", msg[i]);
-		chk += msg[i];
-	}
-	chk += bcount;
-	printf("#%02x*%02x\n", bcount, chk);
-#endif
+//	if (m->decoded)
+		msg_display(m, "");
 }
 
 /*
  * Return 0 if a double character hex value was decoded, otherwise,
  * return the character that was received (or 0xff for timeout)
  */
-static uint8_t getsbyte(
-		char ** str,
+static uint8_t
+getsbyte(
+		const char ** str,
 		uint8_t * res )
 {
 	uint8_t cnt = 0;
@@ -307,19 +352,52 @@ static uint8_t getsbyte(
 	return 0;
 }
 
-msg_p msg_init(msg_p m, uint8_t type)
+static int
+msg_parse(
+		msg_p m,
+		uint16_t maxsize,
+		const char *line )
 {
-	if (!m)
-		return m;
-	m->chk = 0x55;
-	m->type = type;
-	m->pulses = type == 'P';
-	m->bitcount = m->bytecount = 0;
-	m->pulse_duration = m->checksum_valid = 0;
-	m->msg[0] = 0;
-	return m;
-}
 
+	if (*line == '#')
+		return -1;
+	if (*line != 'M')
+		return -1;
+	msg_init(m, line[1]);
+
+	const char * cur = line + 2;
+	char what = 0, has_checksum = 0;
+	while (strlen(cur) >= 2 && *cur > ' ') {
+		uint8_t d;
+		uint8_t newwhat = getsbyte(&cur, &d);
+		if (newwhat) {
+			what = newwhat;
+			cur++;
+			continue;
+		}
+		switch (what) {
+			case ':': {	/* msg data */
+				if (m->bytecount < maxsize)
+					m->msg[m->bytecount++] = d;
+				m->chk += d;
+			}	break;
+			case '#': /* number of bits in sequence */
+				m->bitcount = d;
+				m->chk += d;
+				break;
+			case '!': /* pulse duration */
+				m->pulse_duration = d;
+				m->chk += d;
+				/* don't really need this at this end */
+				break;
+			case '*': /* checksum */
+				has_checksum = 1;
+				m->checksum_valid = d == m->chk;
+				break;
+		}
+	}
+	return !has_checksum || m->checksum_valid ? 0 : 1;
+}
 
 typedef struct msg_match_t {
 	struct msg_match_t *next;
@@ -327,11 +405,11 @@ typedef struct msg_match_t {
 		msg_t			msg;
 		uint8_t 		b[sizeof(msg_t) + (256/8)];
 	};
-	int 			mqtt_qos : 4, lineno;
+	int 				mqtt_qos : 4, lineno;
 
 	const char * 	msg_txt;
-	const char *	mqtt_path;
-	const char *	mqtt_pload;
+	const char *		mqtt_path;
+	const char *		mqtt_pload;
 	char 			_data[];
 } msg_match_t;
 
@@ -406,6 +484,14 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 					(mqtt_pload ? strlen(mqtt_pload) + 1 : 0) +
 					sizeof (msg_match_t);
 			msg_match_t *m = calloc(1, size);
+
+			if (msg_parse(&m->msg, 256, msg) != 0) {
+				fprintf(stderr, "%s:%d Can't parse '%s'\n",
+						mapping_path, linecount, msg);
+				free(m);
+				continue;
+			}
+			msg_display(&m->msg, "load");
 			char *d = m->_data;
 			strcpy(d, msg); m->msg_txt = d; d+= strlen(d) + 1;
 			strcpy(d, mqtt_path); m->mqtt_path = d; d+= strlen(d) + 1;
@@ -462,7 +548,7 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 	/* in case it's a serial port do stuff to it */
 	{
 		const char * stty =
-			"stty -clocal -icanon -hupcl -cread -opost -echo <%s >/dev/null 2>&1";
+			"stty 115200 -clocal -icanon -hupcl -cread -opost -echo <%s >/dev/null 2>&1";
 		char * d = malloc(strlen(stty) + strlen(serial_path) + 10);
 
 		sprintf(d, stty, serial_path);
@@ -475,10 +561,7 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 		perror(serial_path);
 		exit(1);
 	}
-	union {
-		msg_t m;
-		uint8_t filler[sizeof(msg_t) + 512];
-	} u;
+	msg_full_t u;
 	while (fgets(line, sizeof(line), f)) {
 		// strip line
 		while (*line && line[strlen(line)-1] <= ' ')
@@ -486,44 +569,18 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 		if (!*line) continue;
 		printf("%s\n", line);
 
-		if (*line == '#')
+		if (msg_parse(&u.m, 512, line) != 0)
 			continue;
-		if (*line != 'M')
-			continue;
-		msg_init(&u.m, line[1]);
 
-		char * cur = line + 2;
-		char what = 0;
-		while (strlen(cur) >= 2) {
-			uint8_t d;
-			uint8_t newwhat = getsbyte(&cur, &d);
-			if (newwhat) {
-				what = newwhat;
-				continue;
+		if (u.m.checksum_valid) {
+			msg_p d = &u.m;
+			msg_full_t full;
+
+			if (d->bitcount && d->pulses) {
+				decoder(d, &full.m);
+				d = &full.m;
 			}
-			switch (what) {
-				case ':': {	/* msg data */
-					u.m.msg[u.m.bytecount++] = d;
-					u.m.chk += d;
-				}	break;
-				case '#': /* number of bits in sequence */
-					u.m.bitcount = d;
-					u.m.chk += d;
-					break;
-				case '!': /* pulse duration */
-					u.m.pulse_duration = d;
-					u.m.chk += d;
-					/* don't really need this at this end */
-					break;
-				case '*': /* checksum */
-					u.m.checksum_valid = d == u.m.chk;
-					if (u.m.checksum_valid) {
-						if (u.m.bitcount)
-							decoder(&u.m);
-						display(&u.m);
-					}
-					break;
-			}
+			display(d);
 		}
 	}
 	fclose(f);
