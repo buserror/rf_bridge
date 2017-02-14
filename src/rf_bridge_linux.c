@@ -25,7 +25,7 @@ struct {
 };
 #endif
 
-const char *mqtt_path = "mqtt";
+const char *mqtt_root = "mqtt";
 
 
 unsigned debug_sync;
@@ -173,9 +173,9 @@ weather_decode(
 #ifdef MQTT
 		char *root;
 		if (mqtt_weather_name[channel].name)
-			asprintf(&root, "%s/sensor/%s", mqtt_path, mqtt_weather_name[channel].name);
+			asprintf(&root, "%s/sensor/%s", mqtt_root, mqtt_weather_name[channel].name);
 		else
-			asprintf(&root, "%s/sensor/%d", mqtt_path, channel);
+			asprintf(&root, "%s/sensor/%d", mqtt_root, channel);
 
 		char *v;
 		asprintf(&v, "{"
@@ -325,7 +325,7 @@ display(
 			}
 		}
 	}
-//	if (m->decoded)
+	if (m->decoded)
 		msg_display(m, "");
 }
 
@@ -412,7 +412,8 @@ typedef struct msg_match_t {
 		msg_t			msg;
 		uint8_t 		b[sizeof(msg_t) + (256/8)];
 	};
-	int 				mqtt_qos : 4, lineno;
+	int 				mqtt_qos : 4,
+					pload_flags : 3, lineno;
 	uint64_t			last;	// last time this was sent
 	const char * 	msg_txt;
 	const char *		mqtt_path;
@@ -421,6 +422,61 @@ typedef struct msg_match_t {
 } msg_match_t;
 
 msg_match_t * matches = NULL;
+
+
+
+static void
+mq_message_cb(
+		struct mosquitto *mosq,
+		void *userdata,
+		const struct mosquitto_message *message )
+{
+	int flags = 0;
+
+	if (message->payloadlen) {
+		/* if it's US having received it via RF and published, ignore it */
+		if (strstr(message->payload, "\"src\":\"rf\""))
+			return;
+		if (strstr(message->payload, "\"on\":true"))
+			flags |= 1;
+		if (strstr(message->payload, "\"on\":false"))
+			flags |= 2;
+		printf(">> %s %s\n", message->topic, (char*)message->payload);
+	}
+
+	msg_match_t * m = matches;
+	while (m) {
+		if (!strcmp(message->topic, m->mqtt_path)) {
+			if (m->pload_flags == flags) {
+				msg_display(&m->msg, "SEND");
+			}
+		}
+		m = m->next;
+	}
+}
+
+static void
+mq_connect_cb(
+		struct mosquitto *mosq,
+		void *userdata,
+		int result)
+{
+	if (result) {
+		fprintf(stderr, "MQTT: Connect failed\n");
+		return;
+	}
+	/* Subscribe to broker information topics on successful connect. */
+//	mosquitto_subscribe(mosq, NULL, "$SYS/#", 2);
+
+	msg_match_t * m = matches;
+	while (m) {
+		mosquitto_subscribe(mosq, NULL, m->mqtt_path, 2);
+		m = m->next;
+	}
+}
+
+
+
 
 int main(int argc, const char *argv[])
 {
@@ -434,7 +490,7 @@ int main(int argc, const char *argv[])
 		if (!strcmp(argv[i], "-h") && i < (argc-1)) {
 			mqtt_hostname = argv[++i];
 		} else if (!strcmp(argv[i], "-r") && i < (argc-1)) {
-			mqtt_path = argv[++i];
+			mqtt_root = argv[++i];
 		} else if (!strcmp(argv[i], "-p") && i < (argc-1)) {
 			mqtt_password = argv[++i];
 		} else if (!strcmp(argv[i], "-m") && i < (argc-1)) {
@@ -475,7 +531,9 @@ int main(int argc, const char *argv[])
 			const char * mqtt_path = strsep(&l, " \t");
 			const char * mqtt_qos = strsep(&l, " \t");
 			const char * mqtt_pload = strsep(&l, " \t");
-printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
+
+			//printf("%d %s %s %s %s\n",  linecount, msg,
+			//		mqtt_path, mqtt_qos, mqtt_pload);
 			if (!msg || msg[0] != 'M' || (msg[1] != 'A' && msg[1] != 'M')) {
 				fprintf(stderr, "%s:%d invalid message format\n",
 						mapping_path, linecount);
@@ -487,7 +545,9 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 				continue;
 			}
 
-			int size = strlen(msg) + 1 + strlen(mqtt_path) + 1 +
+			int size = strlen(msg) + 1 +
+					strlen(mqtt_root) + 1 +
+					strlen(mqtt_path) + 1 +
 					(mqtt_pload ? strlen(mqtt_pload) + 1 : 0) +
 					sizeof (msg_match_t);
 			msg_match_t *m = calloc(1, size);
@@ -498,12 +558,16 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 				free(m);
 				continue;
 			}
-			msg_display(&m->msg, "load");
 			char *d = m->_data;
-			strcpy(d, msg); m->msg_txt = d; d+= strlen(d) + 1;
-			strcpy(d, mqtt_path); m->mqtt_path = d; d+= strlen(d) + 1;
+			strcpy(d, msg); m->msg_txt = d; d += strlen(d) + 1;
+			sprintf(d, "%s/%s", mqtt_root, mqtt_path);
+			m->mqtt_path = d; d += strlen(d) + 1;
 			if (mqtt_pload) {
 				strcpy(d, mqtt_pload); m->mqtt_pload = d; d+= strlen(d) + 1;
+				if (strstr(mqtt_pload, "\"on\":true"))
+					m->pload_flags |= 1;
+				if (strstr(mqtt_pload, "\"on\":false"))
+					m->pload_flags |= 2;
 			}
 			if (mqtt_qos)
 				m->mqtt_qos = atoi(mqtt_qos);
@@ -532,11 +596,14 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 		asprintf(&client, "%s/%s/%d", hn, basename(strdup(argv[0])), getpid());
 		mosq = mosquitto_new(client, true, 0);
 
-		if (!mqtt_path)
-			mqtt_path = hn;	// safe, we don't return anytime soon
+		if (!mqtt_root)
+			mqtt_root = hn;	// safe, we don't return anytime soon
 		// TODO: CHANGE? login default to hostname
 		if (mqtt_password)
 			mosquitto_username_pw_set(mosq, hn, mqtt_password);
+
+		mosquitto_connect_callback_set(mosq, mq_connect_cb);
+		mosquitto_message_callback_set(mosq, mq_message_cb);
 
 		int rc = mosquitto_connect_async(mosq, mqtt_hostname, 1883, 60);
 		if (rc) {
@@ -597,14 +664,11 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 						!memcmp(m->msg.msg, d->msg, d->bytecount)) {
 					if (now - m->last > 500) {
 #ifdef MQTT
-						char root[128];
-						snprintf(root, sizeof(root), "%s/%s",
-								mqtt_path, m->mqtt_path);
 						mosquitto_publish(mosq, NULL,
-								root,
+								m->mqtt_path,
 								strlen(m->mqtt_pload), m->mqtt_pload,
 								1, true);
-						printf("%s %s\n", root, m->mqtt_pload);
+						printf("%s %s\n", m->mqtt_path, m->mqtt_pload);
 #endif
 					}
 					m->last = now;

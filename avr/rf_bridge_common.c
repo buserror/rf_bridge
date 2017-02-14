@@ -99,6 +99,7 @@ volatile uint8_t msg_start = 0,
 enum {
 	mode_Idle = 0,
 	mode_Receiving,
+	mode_StartTransmit,
 	mode_Transmitting,
 };
 volatile uint8_t transceiver_mode = mode_Receiving;
@@ -115,6 +116,7 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 {
 	static uint8_t bit = 0;			// bool
 	static uint8_t shifter = 0;		// shift register for edge detect
+	static uint8_t tp[2];
 
 	D(pin_set(pin_Debug2);)
 
@@ -142,19 +144,29 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 			D(pin_set_to(pin_Debug0, bit);)
 		}	break;
 		case mode_Transmitting: {
-			if (pulse[current_pulse][bit])
-				pulse[current_pulse][bit]--;
-			if (pulse[current_pulse][bit])
+			if (tp[bit])
+				tp[bit]--;
+			if (tp[bit])
 				break;
 			bit = !bit;
 			pin_set_to(pin_Transmitter, bit);
 			if (bit) {
 				current_pulse++;
+				tp[0] = pulse[current_pulse][0];
+				tp[1] = pulse[current_pulse][1];
 				if (current_pulse == msg_end) {
 					transceiver_mode = mode_Idle;
-					pin_set_to(pin_Transmitter, bit);
+					pin_set_to(pin_Transmitter, 0);
 				}
 			}
+		}	break;
+		case mode_StartTransmit: {
+			bit = 1;
+			transceiver_mode = mode_Transmitting;
+			pin_set_to(pin_Transmitter, 0);
+			current_pulse = msg_start;
+			tp[0] = pulse[current_pulse][0];
+			tp[1] = pulse[current_pulse][1];
 		}	break;
 	}
 	D(pin_clr(pin_Debug2);)
@@ -474,10 +486,10 @@ AVR_CR(cr_receive_cmd)
 		static uint8_t b;
 		static uint8_t byte;
 
-		b = 255;
 		b = uart_recv();
 		if (b == 0xff)
 			goto again;
+		transceiver_mode = mode_Idle;
 		if (b == 'M') {
 			uint8_t msg_type = uart_recv();
 			if (msg_type == 0xff)
@@ -496,6 +508,7 @@ AVR_CR(cr_receive_cmd)
 				err = b;
 				goto skipline;
 			}
+			current_pulse = 0;
 			uint8_t chk = 0x55;
 			do {
 				b = uart_recv();
@@ -507,11 +520,20 @@ newkey:
 						// process end of message or timeout
 						if ((b = getsbyte(&byte)))
 							goto newkey;
+						chk += byte;
 						// here we /know we got a valid hex value
 						switch (msg_type) {
 						case 'A':
+							for (uint8_t b = 0; b < 8; b++) {
+								uint8_t bit = (byte >> (7-b)) & 1;
+								pulse[current_pulse][bit] =
+										syncduration - (syncduration/4);
+								pulse[current_pulse][!bit] =
+										syncduration / 4;
+								current_pulse++;
+							}
 							break;
-						case 'M':
+						case 'M':	// TODO
 							break;
 						case 'P':
 							break;
@@ -521,14 +543,22 @@ newkey:
 				case '*': /* checksum */
 					if (getsbyte(&b))
 						goto skipline;
+					printf_P(PSTR("< %d chk %02x/%02x\n"),
+							current_pulse, b, chk);
 					if (b == chk) {
 						state++;
-						if (msg_end >= 16) {
-							transceiver_mode = mode_Idle;
-							while (transceiver_mode == mode_Transmitting) {
+						pulse[current_pulse][0] = 127; // long low pulse
+						pulse[current_pulse][1] = 0;
+						msg_end = current_pulse + 1;
+						msg_start = 0;
+						if (msg_end <= 16)	// too small, don't bother
+							goto skipline;
+						b = 3; // retries
+						while (b--) {
+							transceiver_mode = mode_StartTransmit;
+							while (transceiver_mode != mode_Idle) {
 								cr_yield(1);
 							}
-							/* TODO: multiple sends ? */
 						}
 						goto skipline;
 					} else {
@@ -550,7 +580,6 @@ newkey:
 					err = b;
 					goto skipline;
 				}
-				break;
 			} while (1);
 		} else if (b == 'P') {
 			if ((b = recv_match_string_P(PSTR("PULSE\n"))) == '\n') {
@@ -652,7 +681,6 @@ void rf_bridge_run()
 				msg_end = 0;
 			}	break;
 			case state_ReceivingCommand: {
-				transceiver_mode = mode_Idle;
 				cr_resume(receive_cmd);
 			}	break;
 		}
