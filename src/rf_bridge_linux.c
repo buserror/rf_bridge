@@ -5,6 +5,7 @@
 #include <string.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 #ifdef MQTT
 #include <mosquitto.h>
@@ -399,6 +400,12 @@ msg_parse(
 	return !has_checksum || m->checksum_valid ? 0 : 1;
 }
 
+static uint64_t gettime_ms() {
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	return (((uint64_t)tv.tv_sec) * 1000) + (tv.tv_usec / 1000);
+}
+
 typedef struct msg_match_t {
 	struct msg_match_t *next;
 	union {
@@ -406,7 +413,7 @@ typedef struct msg_match_t {
 		uint8_t 		b[sizeof(msg_t) + (256/8)];
 	};
 	int 				mqtt_qos : 4, lineno;
-
+	uint64_t			last;	// last time this was sent
 	const char * 	msg_txt;
 	const char *		mqtt_path;
 	const char *		mqtt_pload;
@@ -581,6 +588,29 @@ printf("%d %s %s %s %s\n",  linecount, msg, mqtt_path, mqtt_qos, mqtt_pload);
 				d = &full.m;
 			}
 			display(d);
+
+			msg_match_t *m = matches;
+			uint16_t want = ((uint16_t*)d->msg)[0];
+			uint64_t now = gettime_ms();
+			while (m) {
+				if (*((uint16_t*)m->msg.msg) == want &&
+						!memcmp(m->msg.msg, d->msg, d->bytecount)) {
+					if (now - m->last > 500) {
+#ifdef MQTT
+						char root[128];
+						snprintf(root, sizeof(root), "%s/%s",
+								mqtt_path, m->mqtt_path);
+						mosquitto_publish(mosq, NULL,
+								root,
+								strlen(m->mqtt_pload), m->mqtt_pload,
+								1, true);
+						printf("%s %s\n", root, m->mqtt_pload);
+#endif
+					}
+					m->last = now;
+				}
+				m = m->next;
+			}
 		}
 	}
 	fclose(f);

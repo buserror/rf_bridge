@@ -3,18 +3,21 @@
 # One to set a 'state' with QOS 2 (keep it) and one as a fire event
 # with QoS 0 for notification.
 
-MA:4055c300#19	switch/reading 2 "on":true
-MA:4055c300#19	switch/reading/on 0
-MA:4055cc00#19	switch/reading 2 "on":false
-MA:4055cc00#19	switch/reading/off 0
+MA!2f:4055c300#19	switch/reading 2 {"on":true,"src":"rf"}
+MA!2f:4055cc00#19	switch/reading 2 {"on":false,"src":"rf"}
 
-MA:405d0300#19	switch/audi 2 "on":true
-MA:40550000#19	switch/audi 2 "on":true
-MA:405d0c00#19	switch/audi 2 "on":false
+MA!2f:405d0300#19	switch/audi 2 {"on":true,"src":"rf"}
+MA!2f:405d0c00#19	switch/audi 2 {"on":false,"src":"rf"}
 
-MA:40553300#19	switch/bar 2 "on":true
-MA:40553c00#19	switch/bar 2 "on":false
+MA!2f:40553300#19	switch/bar 2 {"on":true,"src":"rf"}
+MA!2f:40553c00#19	switch/bar 2 {"on":false,"src":"rf"}
 
-MA:3d65e400#19	switch/office 2 "on":true
-MA:3d65e200#19	switch/office 2 "on":false
+MA!53:3d65e400#19	switch/office 2 {"on":true,"src":"rf"}
+MA!53:3d65e200#19	switch/office 2 {"on":false,"src":"rf"}
 	
+MA!59:d0aa1400#19	switch/lounge 2 {"on":true,"src":"rf"}
+MA!59:d0aa1200#19	switch/lounge 2 {"on":false,"src":"rf"}
+
+MA!53:f4c3e400#19	switch/bathroom	2	{"on":true,"src":"rf"}
+MA!53:f4c3e200#19	switch/bathroom	2	{"on":false,"src":"rf"}
+
