@@ -104,20 +104,22 @@ msg_init(
 
 void
 msg_display(
+		FILE *out,
 		msg_p m,
 		const char * pfx)
 {
 	uint8_t chk = 0x55;
-	printf("%s%sM%c", pfx ? pfx : "", pfx && *pfx ? " " : "", m->type);
-	if (m->pulse_duration) printf("!%02x", m->pulse_duration);
-	printf(":");
+	fprintf(out, "%s%sM%c", pfx ? pfx : "", pfx && *pfx ? " " : "", m->type);
+	if (m->pulse_duration)
+		fprintf(out, "!%02x", m->pulse_duration);
+	fprintf(out, ":");
 	for (uint8_t i = 0; i < (m->bitcount + 7) / 8; i++) {
-		printf("%02x", m->msg[i]);
+		fprintf(out, "%02x", m->msg[i]);
 		chk += m->msg[i];
 	}
 	chk += m->bitcount;
 	chk += m->pulse_duration;
-	printf("#%02x*%02x\n", m->bitcount, chk);
+	fprintf(out, "#%02x*%02x\n", m->bitcount, chk);
 }
 
 /* Ambient Weather F007th */
@@ -325,7 +327,7 @@ display(
 		}
 	}
 	if (m->decoded)
-		msg_display(m, "");
+		msg_display(stdout, m, "");
 }
 
 /*
@@ -402,7 +404,8 @@ msg_parse(
 	return !has_checksum || m->checksum_valid ? 0 : 1;
 }
 
-static uint64_t gettime_ms() {
+static uint64_t gettime_ms()
+{
 	struct timeval tv;
 	gettimeofday(&tv, NULL);
 	return (((uint64_t)tv.tv_sec) * 1000) + (tv.tv_usec / 1000);
@@ -424,7 +427,8 @@ typedef struct msg_match_t {
 } msg_match_t;
 
 msg_match_t * matches = NULL;
-
+const char *serial_path = NULL;
+int serial_fd = -1;
 
 #ifdef MQTT
 /*
@@ -454,7 +458,19 @@ mq_message_cb(
 	while (m) {
 		if (!strcmp(message->topic, m->mqtt_path)) {
 			if (m->pload_flags == flags) {
-				msg_display(&m->msg, "SEND");
+				msg_display(stdout, &m->msg, "SEND");
+
+				/* I feel slightly dirty here, but it allows
+				 * the serial port to stay available for writing commands
+				 * and stuff, and /normally/ messages aren't that often.
+				 * I'm sure linux will cope..?
+				 */
+				FILE *o = fopen(serial_path, "w");
+
+				if (o) {
+					msg_display(o, &m->msg, "");
+					fclose(o);
+				}
 			}
 		}
 		m = m->next;
@@ -484,7 +500,6 @@ mq_connect_cb(
 
 int main(int argc, const char *argv[])
 {
-	const char *serial_path = NULL;
 	const char *mqtt_hostname = NULL;
 	const char *mqtt_password = NULL;
 	const char *mapping_path = NULL;
