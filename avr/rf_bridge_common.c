@@ -149,24 +149,25 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 			if (tp[bit])
 				break;
 			bit = !bit;
-			pin_set_to(pin_Transmitter, bit);
 			if (bit) {
 				current_pulse++;
 				tp[0] = pulse[current_pulse][0];
 				tp[1] = pulse[current_pulse][1];
 				if (current_pulse == msg_end) {
 					transceiver_mode = mode_Idle;
-					pin_set_to(pin_Transmitter, 0);
-				}
+					bit = 0; // we're done, return to 0
+				} else
+					bit = !!tp[1];
 			}
+			pin_set_to(pin_Transmitter, bit);
 		}	break;
 		case mode_StartTransmit: {
 			bit = 1;
 			transceiver_mode = mode_Transmitting;
-			pin_set_to(pin_Transmitter, 0);
 			current_pulse = msg_start;
 			tp[0] = pulse[current_pulse][0];
 			tp[1] = pulse[current_pulse][1];
+			pin_set_to(pin_Transmitter, 1);
 		}	break;
 	}
 	D(pin_clr(pin_Debug2);)
@@ -215,13 +216,17 @@ AVR_CR(cr_syncsearch)
 	uint8_t synclen = 0;
 	uint8_t manchester = 0;
 	do {
-		while (pi == current_pulse)
+		while (pi == current_pulse) {
+			if (synclen == 0) {
+				if (!uart_rx_isempty(&uart_rx))
+					running_state = state_ReceivingCommand;
+			}
 			cr_yield(0);
-
+		}
 		while (pi != current_pulse && synclen < 8) {
 			uint8_t d = pulse[pi][0] + pulse[pi][1];
 
-			if (d < 12 || abs_sub(d, syncduration) > 8) {
+			if (d < 0x20 || abs_sub(d, syncduration) > 8) {
 				syncstart = pi;
 				syncduration = d;
 				synclen = 0;
@@ -253,9 +258,6 @@ AVR_CR(cr_syncsearch)
 			byte = 0;
 			msg_end = 0;
 			D(pin_clr(pin_Debug1);)
-		} else if (synclen == 0) {
-			if (!uart_rx_isempty(&uart_rx))
-				running_state = state_ReceivingCommand;
 		}
 		if (running_state != state_SyncSearch) {
 			cr_yield(0);
@@ -500,7 +502,7 @@ AVR_CR(cr_receive_cmd)
 				err = b;
 				goto skipline;
 			}
-			current_pulse = 0;
+			bcount = 0;
 			uint8_t chk = 0x55;
 			do {
 				b = uart_recv();
@@ -518,11 +520,11 @@ newkey:
 						case 'A':
 							for (uint8_t b = 0; b < 8; b++) {
 								uint8_t bit = (byte >> (7-b)) & 1;
-								pulse[current_pulse][bit] =
+								pulse[bcount][bit] =
 										syncduration - (syncduration/4);
-								pulse[current_pulse][!bit] =
+								pulse[bcount][!bit] =
 										syncduration / 4;
-								current_pulse++;
+								bcount++;
 							}
 							break;
 						case 'M':	// TODO
@@ -535,13 +537,16 @@ newkey:
 				case '*': /* checksum */
 					if (getsbyte(&b))
 						goto skipline;
-					printf_P(PSTR("< %d chk %02x/%02x\n"),
-							current_pulse, b, chk);
+				//	printf_P(PSTR("< %d chk %02x/%02x\n"),
+				//			current_pulse, b, chk);
 					if (b == chk) {
 						state++;
-						pulse[current_pulse][0] = 127; // long low pulse
-						pulse[current_pulse][1] = 0;
-						msg_end = current_pulse + 1;
+						pulse[bcount][0] = 127; // long low pulse
+						pulse[bcount][1] = 0;
+						bcount++;
+						pulse[bcount][0] = 127; // long low pulse
+						pulse[bcount][1] = 0;
+						msg_end = bcount + 1;
 						msg_start = 0;
 						if (msg_end <= 16)	// too small, don't bother
 							goto skipline;
@@ -641,7 +646,8 @@ void rf_bridge_run()
 
 #ifdef SIMAVR
 	/* add a message to the buffer */
-	const char * msg = "MA!53:f4c3e400#19\n";
+	const char * msg = "MA!30:40553300#19*66\n";
+	printf(msg);
 	for (int8_t i = 0; msg[i]; i++)
 		uart_rx_write(&uart_rx, msg[i]);
 #endif

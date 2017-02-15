@@ -49,6 +49,11 @@
 /* simavr specific, not strictly needed until simulating */
 #include "avr_mcu_section.h"
 AVR_MCU(F_CPU, "atmega2560");
+
+AVR_MCU_VCD_PORT_PIN('H', 4); // transmitter
+AVR_MCU_VCD_PORT_PIN('E', 4); // Debug0
+AVR_MCU_VCD_PORT_PIN('E', 5); // Debug1
+
 #endif
 
 #include "rf_bridge_common.h"
