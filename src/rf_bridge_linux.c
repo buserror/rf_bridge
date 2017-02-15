@@ -197,10 +197,9 @@ weather_decode(
 	}
 }
 
-uint8_t manchester = 0;
 
 void
-decoder(
+pulse_decoder(
 		msg_p m,
 		msg_p o)
 {
@@ -211,7 +210,7 @@ decoder(
 	uint8_t syncstart = 0;
 	uint8_t syncduration = 0;
 	uint8_t synclen = 0;
-	manchester = 0;
+	uint8_t manchester = 0;
 
 	typedef uint8_t pulse_t[2];
 	pulse_t *pulse = (pulse_t *)m->msg;
@@ -331,7 +330,7 @@ display(
 
 /*
  * Return 0 if a double character hex value was decoded, otherwise,
- * return the character that was received (or 0xff for timeout)
+ * return that character offending, also increment the string pointer
  */
 static uint8_t
 getsbyte(
@@ -353,13 +352,16 @@ getsbyte(
 	return 0;
 }
 
+/*
+ * Parse a message string, fill up 'm'. Note that is no boundary check here
+ * TODO: Add some sort of boundary check
+ */
 static int
 msg_parse(
 		msg_p m,
 		uint16_t maxsize,
 		const char *line )
 {
-
 	if (*line == '#')
 		return -1;
 	if (*line != 'M')
@@ -424,7 +426,11 @@ typedef struct msg_match_t {
 msg_match_t * matches = NULL;
 
 
-
+#ifdef MQTT
+/*
+ * We use a cheap trick for detecting on/off and also messages that have been
+ * sent by /us/ (so we don't create a feedback loop)
+ */
 static void
 mq_message_cb(
 		struct mosquitto *mosq,
@@ -465,8 +471,6 @@ mq_connect_cb(
 		fprintf(stderr, "MQTT: Connect failed\n");
 		return;
 	}
-	/* Subscribe to broker information topics on successful connect. */
-//	mosquitto_subscribe(mosq, NULL, "$SYS/#", 2);
 
 	msg_match_t * m = matches;
 	while (m) {
@@ -474,7 +478,7 @@ mq_connect_cb(
 		m = m->next;
 	}
 }
-
+#endif /* MQTT */
 
 
 
@@ -627,7 +631,8 @@ int main(int argc, const char *argv[])
 
 		sprintf(d, stty, serial_path);
 		printf("%s\n", d);
-		system(d);
+		if (system(d))
+			;	// ok to fail
 		free(d);
 	}
 	FILE * f = fopen(serial_path, "r");
@@ -651,7 +656,7 @@ int main(int argc, const char *argv[])
 			msg_full_t full;
 
 			if (d->bitcount && d->pulses) {
-				decoder(d, &full.m);
+				pulse_decoder(d, &full.m);
 				d = &full.m;
 			}
 			display(d);

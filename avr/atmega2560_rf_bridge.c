@@ -81,8 +81,6 @@ int main()
 	OCR0A = 0x3d / 2;
     TIMSK0  |= (1 << OCIE0A);
 
-	pin_output(pin_Transmitter);
-
 #ifdef DEBUG
 	// debug pins for logic analyser
 	pin_output(pin_Debug0);

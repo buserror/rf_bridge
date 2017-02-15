@@ -175,14 +175,6 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
 	sei();
 }
 
-/*
- * Some of these are made inline because flash is cheap,
- * SRAM is not (stack space for calling them
- */
-// overflow substraction for the counters
-static uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
-	return v1 > v2 ? 255 - v1 + v2 : v2 - v1;
-}
 // absolute value substraction for durations etc
 static uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2? v1 - v2 : v2 - v1;
@@ -645,6 +637,13 @@ void rf_bridge_run()
 	memset(decode_manchester.stack, 0xff, sizeof(decode_manchester.stack));
 	memset(decode_pulses.stack, 0xff, sizeof(decode_pulses.stack));
 	memset(receive_cmd.stack, 0xff, sizeof(receive_cmd.stack));
+#endif
+
+#ifdef SIMAVR
+	/* add a message to the buffer */
+	const char * msg = "MA!53:f4c3e400#19\n";
+	for (int8_t i = 0; msg[i]; i++)
+		uart_rx_write(&uart_rx, msg[i]);
 #endif
 
 	/* start coroutines on their own stacks */

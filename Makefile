@@ -7,23 +7,28 @@ O = build
 ifeq (${V},)
 E = @
 else
-E = 
+E =
 endif
 
 AVR_SRC		:= $(wildcard avr/at*.c)
 AVR_OBJ		:= $(patsubst avr/%, ${O}/%, ${AVR_SRC:%.c=%.axf})
-EXTRA_CFLAGS += -Ishared
+EXTRA_CFLAGS	+= -Ishared
+
+ifneq ($(SIMAVR),)
+EXTRA_CFLAGS	+= -DSIMAVR
+EXTRA_CFLAGS	+= -I$(SIMAVR)/simavr/sim/avr/
+endif
 
 all :  ${O} ${AVR_OBJ} ${O}/rf_bridged
 
-${O}: 
+${O}:
 	${E}mkdir -p build
-		
+
 ${O}/%.hex: ${O}/%.axf
 		${E}avr-objcopy -j .text -j .data -O ihex ${<} ${@}
 ${O}/%.s: ${O}/%.axf
 		${E}avr-objdump -S -j .text -j .data -j .bss -d  ${<} > ${@}
-${O}/%.axf: avr/%.c 
+${O}/%.axf: avr/%.c
 		${E}echo AVR-CC ${<}
 		${E}part=${shell basename ${<}} ; part=$${part/_*}; \
 		avr-gcc -MMD -Wall -gdwarf-2 -Os -std=gnu99 ${EXTRA_CFLAGS} \
