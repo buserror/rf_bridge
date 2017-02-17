@@ -1,23 +1,35 @@
 
 # We send two messages when getting the said bit strings
-# One to set a 'state' with QOS 2 (keep it) and one as a fire event
-# with QoS 0 for notification.
-
-MA!2f:4055c300#19	switch/reading 2 {"on":true,"src":"rf"}
-MA!2f:4055cc00#19	switch/reading 2 {"on":false,"src":"rf"}
-
-MA!2f:405d0300#19	switch/audi 2 {"on":true,"src":"rf"}
-MA!2f:405d0c00#19	switch/audi 2 {"on":false,"src":"rf"}
+# One to set a 'state' with QOS 2 
+# The MQTT message /back/ are mapped back to the bit sequences
+# and sent to the firmware for modulation
 
 MA!2f:40553300#19	switch/bar 2 {"on":true,"src":"rf"}
 MA!2f:40553c00#19	switch/bar 2 {"on":false,"src":"rf"}
 
-MA!53:3d65e400#19	switch/office 2 {"on":true,"src":"rf"}
-MA!53:3d65e200#19	switch/office 2 {"on":false,"src":"rf"}
-	
+MA!2f:405d0300#19	switch/audi 2 {"on":true,"src":"rf"}
+MA!2f:405d0c00#19	switch/audi 2 {"on":false,"src":"rf"}
+
 MA!59:d0aa1400#19	switch/lounge 2 {"on":true,"src":"rf"}
 MA!59:d0aa1200#19	switch/lounge 2 {"on":false,"src":"rf"}
+
+MA!2f:4055c300#19	switch/reading 2 {"on":true,"src":"rf"}
+MA!2f:4055cc00#19	switch/reading 2 {"on":false,"src":"rf"}
+
+MA!53:3d65e400#19	switch/office 2 {"on":true,"src":"rf"}
+MA!53:3d65e200#19	switch/office 2 {"on":false,"src":"rf"}
 
 MA!53:f4c3e400#19	switch/bathroom	2	{"on":true,"src":"rf"}
 MA!53:f4c3e200#19	switch/bathroom	2	{"on":false,"src":"rf"}
 
+MA!54:3b1a1400#19	switch/patio	2	{"on":true,"src":"rf"}
+MA!54:3b1a1200#19	switch/patio	2	{"on":false,"src":"rf"}
+
+MA!2f:40750300#19	switch/amp	2	{"on":true,"src":"rf"}
+MA!2f:40750c00#19	switch/amp	2	{"on":false,"src":"rf"}
+
+MA!2f:40570300#19	switch/bt	2	{"on":true,"src":"rf"}
+MA!2f:40570c00#19	switch/bt	2	{"on":false,"src":"rf"}
+
+MA!54:bfff1400#19	switch/kitchen	2	{"on":true,"src":"rf"}
+MA!54:bfff1200#19	switch/kitchen	2	{"on":false,"src":"rf"}
