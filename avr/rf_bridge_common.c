@@ -112,7 +112,7 @@ volatile uint8_t transceiver_mode = mode_Receiving;
  * On transmit we just go over the buffer setting the output state as we
  * go along, decrementing remaining pulses as we go forward.
  */
-ISR(TIMER0_COMPA_vect)	// handler for Output Compare 1 overflow interrupt
+ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 {
 	static uint8_t bit = 0;			// bool
 	static uint8_t shifter = 0;		// shift register for edge detect

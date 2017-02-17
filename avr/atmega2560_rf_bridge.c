@@ -50,9 +50,15 @@
 #include "avr_mcu_section.h"
 AVR_MCU(F_CPU, "atmega2560");
 
-AVR_MCU_VCD_PORT_PIN('H', 4); // transmitter
-AVR_MCU_VCD_PORT_PIN('E', 4); // Debug0
-AVR_MCU_VCD_PORT_PIN('E', 5); // Debug1
+AVR_MCU_VCD_PORT_PIN('H', 4, "TX"); // transmitter
+AVR_MCU_VCD_PORT_PIN('E', 4, ""); // Debug0
+AVR_MCU_VCD_PORT_PIN('E', 5, ""); // Debug1
+
+AVR_MCU_VCD_IRQ(TIMER0_COMPA);
+AVR_MCU_VCD_IRQ(USART0_UDRE);
+AVR_MCU_VCD_IRQ(USART0_RX);
+
+AVR_MCU_VCD_ALL_IRQ();
 
 #endif
 

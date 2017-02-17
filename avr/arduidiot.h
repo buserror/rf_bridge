@@ -65,7 +65,7 @@ enum {
 	_AVR_PORTA,
 #endif
 	_AVR_PORTB, _AVR_PORTC, _AVR_PORTD, _AVR_PORTE, _AVR_PORTF,
-	_AVR_PORTG, 
+	_AVR_PORTG,
 	// PORTH and others are way afterward, at 0x100 IO space
 	_AVR_PORTH, _AVR_PORTI, _AVR_PORTJ, _AVR_PORTK, _AVR_PORTL,
 };
@@ -125,7 +125,7 @@ static const ardupin_t arduidiot_644[] = {
 	MPORT( 0, B),
 	MPORT( 8, D),
 	MPORT(16, C),
-	
+
 	MADCB(24, A, 7),
 	MADCB(25, A, 6),
 	MADCB(26, A, 5),
@@ -164,7 +164,7 @@ static const ardupin_t arduidiot_2560[] = {
 
 	MPIN(20, D, 1),
 	MPIN(21, D, 0),
-	MPORT(22, A),	
+	MPORT(22, A),
 
 	MPIN(30, C, 7),
 	MPIN(31, C, 6),
@@ -277,6 +277,5 @@ static const ardupin_t arduidiot_2560[] = {
 		__DDR(__p) &= ~(1 << ((_pins[__p]).pin))
 #define pin_toggle(__p) \
 		__PIN(__p) |= (1 << ((_pins[__p]).pin))
-
 
 #endif /* ARDUIDIOT_H_ */
