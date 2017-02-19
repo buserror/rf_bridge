@@ -606,6 +606,13 @@ skipline:
 			b = uart_recv();
 		if (err) printf_P(PSTR("!%d\n"), err);
 		else if (state) printf_P(PSTR("*OK\n"));
+#ifdef SIMAVR
+		b = 255;
+		while (b--) {
+			sleep_cpu();
+		}
+		cli();cli();	 sleep_cpu();
+#endif
 again:
 		running_state = state_SyncSearch;
 		msg_start = msg_end = current_pulse = 0;
