@@ -75,7 +75,9 @@ static inline void _set_stack(register void * stack)
 	);
 }
 typedef struct avr_cr {
+#ifdef CR_MAIN
 	struct avr_cr *next;
+#endif
 	jmp_buf jmp;
 	uint8_t running : 1, sleeping : 1;
 #ifdef CR_EXTRA_CONTEXT
@@ -98,7 +100,7 @@ void cr_yield(uint8_t _sleep)
 }
 #else
 extern jmp_buf	cr_caller;
-extern avr_cr * cr_current, * cr_head;
+extern avr_cr * 	cr_current;
 #endif
 
 #define AVR_CR(_name) \
@@ -115,12 +117,19 @@ extern avr_cr * cr_current, * cr_head;
 		uint8_t stack[_stack_size]; \
 	} _name
 
+#ifdef CR_MAIN
+#define _cr_add_task(_name) \
+		_name.cr.next = cr_head; cr_head = &_name.cr;
+#else
+#define cr_add_task(_name)
+#endif
+
 /*
  * Starts a task, this has to be done just once per task
  */
 #define cr_start(_name, _entry) \
 	if (!setjmp(cr_caller)) { \
-		_name.cr.next = cr_head; cr_head = &_name.cr; \
+		_cr_add_task(_name); \
 		cr_current = &_name.cr; \
 		_set_stack(_name.stack + sizeof(_name.stack) - 1);\
 		asm volatile ("rjmp "#_entry); \

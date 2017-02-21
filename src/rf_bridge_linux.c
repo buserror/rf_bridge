@@ -1,3 +1,40 @@
+/*
+	RF433 transceiver firmware.
+
+	This program was made to interface an basic cheapo transceiver 433Mhz
+	module with a (linux) host, to let it handle 'grown up' already
+	decoded messages for example to use with MQTT, home automation,
+	Alexa/Echo and so forth.
+
+	This was made to filter in 433MHZ messages from various remotes and
+	sensors, so some appropriate processing on the fly, and pass that
+	onward to a host computer for 'real' processing.
+
+	The idea is to have a free running pulse trail detection, and being
+	able to notice when it's no longer noise. Firmware can also detect
+	Amplitutde-Key Shifting (ASK) or if it's manchester encoding and
+	decode both on the fly.
+
+	In the other of operation, firmware can receive the same message
+	format with pulses length, and transmit them using a 433MHZ
+	transmitter.
+
+	Copyright 2017 Michel Pollet <buserror@gmail.com>
+
+	This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #define _GNU_SOURCE         /* See feature_test_macros(7) */
 #include <stdio.h>
 #include <stdlib.h>
@@ -217,11 +254,10 @@ pulse_decoder(
 	typedef uint8_t pulse_t[2];
 	pulse_t *pulse = (pulse_t *)m->msg;
 
-	/* this piece scans the pulse stream for some sort of synchronization.
-	 * typically 4 pulses of roughly equal length. When found, the phases
-	 * are also compared; if they are roughly equal, it is likely to be the
-	 * start sequence of some manchester encoded stream. Otherwise, it's much
-	 * more likely to be generic encoding.
+	/*
+	 * Search for 8 pulses of ~equal duration. Even manchester starts with
+	 * at least 8 of them like that, while ASK will always be at least
+	 * 8 bits anyway, so it's a good discriminant
 	 */
 	while (pi != end && synclen < 8) {
 		uint8_t d = pulse[pi][0] + pulse[pi][1];
@@ -238,6 +274,9 @@ pulse_decoder(
 			if (debug_sync > 1)
 				printf("sync %d delta %d/%d = %d\n", synclen,
 					syncduration, d, syncduration - d);
+			/* Integrate half the difference with previous cycle,
+			 * turns out some transmitter start a bit sluggish
+			 * and gradually get to 'speed' */
 			syncduration += (d - syncduration) / 2;
 			synclen++;
 		}

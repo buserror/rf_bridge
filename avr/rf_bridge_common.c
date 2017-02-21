@@ -111,12 +111,13 @@ volatile uint8_t transceiver_mode = mode_Receiving;
  *
  * On transmit we just go over the buffer setting the output state as we
  * go along, decrementing remaining pulses as we go forward.
+ * The 'current' pulse is mirrors, so the message can be replayed.
  */
 ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 {
 	static uint8_t bit = 0;			// bool
 	static uint8_t shifter = 0;		// shift register for edge detect
-	static uint8_t tp[2];
+	static uint8_t tp[2];			// temp pulse
 
 	D(pin_set(pin_Debug2);)
 
@@ -157,12 +158,12 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 					transceiver_mode = mode_Idle;
 					bit = 0; // we're done, return to 0
 				} else
-					bit = !!tp[1];
+					bit = !!tp[1]; // hande case when new phase(1) is zero
 			}
 			pin_set_to(pin_Transmitter, bit);
 		}	break;
 		case mode_StartTransmit: {
-			bit = 1;
+			bit = 1;	// start phase is one.
 			transceiver_mode = mode_Transmitting;
 			current_pulse = msg_start;
 			tp[0] = pulse[current_pulse][0];
@@ -236,6 +237,9 @@ AVR_CR(cr_syncsearch)
 					manchester++;
 				else
 					manchester = 0;
+				/* Integrate half the difference with previous cycle,
+				 * turns out some transmitter start a bit sluggish
+				 * and gradually get to 'speed' */
 				syncduration += (d - syncduration) / 2;
 				synclen++;
 			}
@@ -325,7 +329,7 @@ AVR_CR(cr_decode_ask)
 }
 
 /*
- * After we got a sync, and it's been decided it's basic encoding, go on
+ * After we got a sync, and it's been decided it's manchester, go on
  * and do the decoding on the fly until and end of pulse
  */
 AVR_CR(cr_decode_manchester)
@@ -412,7 +416,7 @@ AVR_CR(cr_decode_pulses)
 }
 
 /*
- * Reads a character form the uart FIFO, return 0xff if we timeouted
+ * Reads a character from the uart FIFO, return 0xff if we timeouted
  */
 uint8_t uart_recv()
 {
@@ -429,6 +433,9 @@ uint8_t uart_recv()
 	return uart_rx_isempty(&uart_rx) ? 0xff : uart_rx_read(&uart_rx);
 }
 
+/* Receive from the uart, matching a string in flash, eventually returns
+ * zero if we matched, or the non-matching character if not.
+ */
 static uint8_t recv_match_string_P(
 		const char * w)
 {

@@ -1,10 +1,23 @@
 /*
- * arduidiot.h
+ *	avr_cr.h
  *
- *  Created on: Jul 14, 2014
- *      Author: michel
+ *	Copyright 2014 Michel Pollet <buserror@gmail.com>
+ *
+ *	This file is part of simavr.
+ *
+ *	simavr is free software: you can redistribute it and/or modify
+ *	it under the terms of the GNU General Public License as published by
+ *	the Free Software Foundation, either version 3 of the License, or
+ *	(at your option) any later version.
+ *
+ *	simavr is distributed in the hope that it will be useful,
+ *	but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *	GNU General Public License for more details.
+ *
+ *	You should have received a copy of the GNU General Public License
+ *	along with simavr.  If not, see <http://www.gnu.org/licenses/>.
  */
-
 #ifndef ARDUIDIOT_H_
 #define ARDUIDIOT_H_
 
@@ -13,7 +26,11 @@
  * pair of port/bit; it uses the arduino pin numbers, and it's main
  * advantages is that it's all preprocessor based, therefore if you
  * use constants as parameter for the macros, they will resolve as
- * a single instruction in most cases
+ * a single instruction in most cases.
+ *
+ * The file can be used on the AVR and/or in the host program like
+ * simavr. In which case, define ARDUIDIO_FULL, you'll be able to
+ * lookup by name as well.
  */
 
 #include <stdint.h>
