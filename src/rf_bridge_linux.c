@@ -497,19 +497,23 @@ mq_message_cb(
 	while (m) {
 		if (!strcmp(message->topic, m->mqtt_path)) {
 			if (m->pload_flags == flags) {
-				msg_display(stdout, &m->msg, "SEND");
+				uint64_t now = gettime_ms();
+				if (now - m->last > 500) {
+					m->last = now;
+					msg_display(stdout, &m->msg, "SEND");
 
-				/* I feel slightly dirty here, but it allows
-				 * the serial port to stay available for writing commands
-				 * and stuff, and /normally/ messages aren't that often.
-				 * I'm sure linux will cope..?
-				 */
-				FILE *o = fopen(serial_path, "w");
+					/* I feel slightly dirty here, but it allows
+					 * the serial port to stay available for writing commands
+					 * and stuff, and /normally/ messages aren't that often.
+					 * I'm sure linux will cope..?
+					 */
+					FILE *o = fopen(serial_path, "w");
 
-				if (o) {
-					msg_display(o, &m->msg, "");
-					fclose(o);
-					usleep(100000);
+					if (o) {
+						msg_display(o, &m->msg, "");
+						fclose(o);
+						usleep(100000);
+					}
 				}
 			}
 		}
