@@ -224,19 +224,36 @@ AVR_CR(cr_syncsearch)
 			}
 			cr_yield(0);
 		}
-		while (pi != current_pulse && synclen < 8) {
-			uint8_t d = pulse[pi][0] + pulse[pi][1];
-
+		while (pi != current_pulse && synclen < 6) {
+			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
+			uint8_t d = p0 + p1;
+			uint8_t m = 0;
+#if 1
+//			if (synclen == 0 || manchester) {
+				/*
+				 * this bit tries to adapt with manchester sequences that
+				 * don't start with a series of 'zeroes'...
+				 */
+				if (abs_sub(p0 / 2, p1) < 4) {
+					p0 /= 2;
+					d = p0 + p1;
+					m++;
+				} else if (abs_sub(p0, p1 / 2) < 4) {
+					p1 /= 2;
+					d = p0 + p1;
+					m++;
+				}
+//			}
+#endif
 			if (d < 0x20 || abs_sub(d, syncduration) > 8) {
 				syncstart = pi;
 				syncduration = d;
 				synclen = 0;
 				manchester = 0;
 			} else {
-				if (abs_sub(pulse[pi][1], pulse[pi][0]) < 12)
-					manchester++;
-				else
-					manchester = 0;
+				if (abs_sub(p1, p0) < 12)
+					m++;
+				manchester += m;
 				/* Integrate half the difference with previous cycle,
 				 * turns out some transmitter start a bit sluggish
 				 * and gradually get to 'speed' */
@@ -246,7 +263,7 @@ AVR_CR(cr_syncsearch)
 			pi++;
 		}
 
-		if (synclen == 8) {
+		if (synclen == 6) {
 			D(pin_set(pin_Debug1);)
 			msg_start = syncstart;
 

@@ -75,7 +75,7 @@ static inline void _set_stack(register void * stack)
 	);
 }
 typedef struct avr_cr {
-#ifdef CR_MAIN
+#if defined(CR_CHAIN)
 	struct avr_cr *next;
 #endif
 	jmp_buf jmp;
@@ -117,11 +117,11 @@ extern avr_cr * 	cr_current;
 		uint8_t stack[_stack_size]; \
 	} _name
 
-#ifdef CR_MAIN
+#if defined(CR_CHAIN)
 #define _cr_add_task(_name) \
 		_name.cr.next = cr_head; cr_head = &_name.cr;
 #else
-#define cr_add_task(_name)
+#define _cr_add_task(_name)
 #endif
 
 /*
@@ -144,7 +144,7 @@ extern avr_cr * 	cr_current;
 		longjmp(cr_current->jmp, 1); \
 	}
 
-#ifdef CR_MAIN
+#if defined(CR_CHAIN) && defined(CR_MAIN)
 /* optional if you won't run all the CR at every ticks */
 static __attribute__ ((unused)) void AVR_TASK_RUN() {
 	avr_cr * h = cr_head;
