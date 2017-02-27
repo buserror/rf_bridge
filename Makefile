@@ -1,17 +1,24 @@
-SHELL=/bin/bash
+SHELL			= /bin/bash
 
 # default frequency
-FREQ = 16000000
-O = build
+FREQ 			= 16000000
+O 				= build
+
+TARGET			= rf_bridged
+DESTDIR 		?= /
+SOV				= 1
+VERSION			= 0.90
+PKG				= 1
+DESC			= 433Mhz to MQTT Bridge (Software part)
 
 ifeq (${V},)
-E = @
+E 				= @
 else
-E =
+E 				=
 endif
 
-AVR_SRC		:= $(wildcard avr/at*.c)
-AVR_OBJ		:= $(patsubst avr/%, ${O}/%, ${AVR_SRC:%.c=%.axf})
+AVR_SRC			:= $(wildcard avr/at*.c)
+AVR_OBJ			:= $(patsubst avr/%, ${O}/%, ${AVR_SRC:%.c=%.axf})
 EXTRA_CFLAGS	+= -Ishared
 
 ifneq ($(SIMAVR),)
@@ -59,5 +66,19 @@ ${O}/rf_bridged: ${wildcard src/*.c}
 		$^ -Wall \
 		-DMQTT -lmosquitto
 
+deb:
+	rm -rf /tmp/deb
+	make clean && make all && make install DESTDIR=/tmp/deb/
+	mkdir -p $(O)/debian; (cd $(O)/debian; \
+	fpm -s dir -t deb -C /tmp/deb -n $(TARGET) -v $(VERSION) --iteration $(PKG) \
+		--description "$(DESC)" \
+		-d "libmosquito1 (>= 1.4.0)" \
+	)
+
+install: ${O}/rf_bridged
+	mkdir -p $(DESTDIR)/etc/ $(DESTDIR)/usr/bin $(DESTDIR)/usr/share/$(TARGET) && \
+	install -s ${O}/rf_bridged $(DESTDIR)/usr/bin/ && \
+		cp rf_bridged.conf $(DESTDIR)/etc/ && \
+		cp ${O}/*.axf $(DESTDIR)/usr/share/$(TARGET)/
 
 -include ${wildcard ${O}/*.d}
