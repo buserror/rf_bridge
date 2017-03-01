@@ -65,8 +65,8 @@ typedef struct ardupin_t {
 #define M644
 #define _PORT_BASE B
 #endif
-#if  defined(__AVR_ATmega168__) || defined(__AVR_ATmega168P__) || defined(__AVR_ATmega168PA__) || \
-		defined(__AVR_ATmega328P__)
+#if  defined(__AVR_ATmega168__) || defined(__AVR_ATmega168P__) || \
+		defined(__AVR_ATmega168PA__) || defined(__AVR_ATmega328P__)
 #define M168
 #define _PORT_BASE B
 #endif
@@ -247,9 +247,12 @@ static const ardupin_t arduidiot_2560[] = {
 #endif
 };
 
-/* The whole point here is that these macros are all 'constant' to feed the compiler, and therefore
- * will work just as well as the old PORTX = xxx and compile with as many instructions.
- * In fact the table up there isn't even compiled in */
+/*
+ * The whole point here is that these macros are all 'constant' to feed
+ * the compiler, and therefore will work just as well as the old
+ * PORTX = xxx and compile with as many instructions. In fact the table
+ * up there isn't even compiled in
+ */
 #define _AVR_IOPORT_SIZE (((void*)&PORTC)-((void*)&PORTB))
 
 #ifdef M2560

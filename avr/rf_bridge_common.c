@@ -576,6 +576,8 @@ newkey:
 							goto skipline;
 						b = 3; // retries
 						while (b--) {
+							// switch antenna to the TX
+							pin_set(pin_Antenna);
 							transceiver_mode = mode_StartTransmit;
 							while (transceiver_mode != mode_Idle) {
 								cr_yield(1);
@@ -638,6 +640,8 @@ skipline:
 		cli();cli();	 sleep_cpu();
 #endif
 again:
+		/* release builtin pullup on antenna switch */
+		pin_clr(pin_Antenna);
 		running_state = state_SyncSearch;
 		msg_start = msg_end = current_pulse = 0;
 	} while (1);
@@ -663,6 +667,9 @@ void rf_bridge_run()
 	pin_clr(pin_Receiver); // no pullup on data pin
 	pin_output(pin_Transmitter);
 	pin_clr(pin_Transmitter);
+
+	// open drain antenna pin. Not sure of switch polarity for now
+	pin_input(pin_Antenna);
 
 	sei();
 	printf_P(PSTR("* Starting RF Firmware\n"));

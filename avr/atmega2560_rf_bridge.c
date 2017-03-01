@@ -51,6 +51,7 @@
 AVR_MCU(F_CPU, "atmega2560");
 
 AVR_MCU_VCD_PORT_PIN('H', 4, "TX"); // transmitter
+AVR_MCU_VCD_PORT_PIN('H', 5, "RX"); // receiver
 AVR_MCU_VCD_PORT_PIN('E', 4, ""); // Debug0
 AVR_MCU_VCD_PORT_PIN('E', 5, ""); // Debug1
 

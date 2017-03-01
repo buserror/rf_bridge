@@ -48,6 +48,7 @@
 enum {
 	pin_Receiver = 8,
 	pin_Transmitter = 7,
+	pin_Antenna = 6,
 	pin_LED = 13,
 #ifdef DEBUG
 	/* Used in the mega project with the signal analyser */
@@ -61,8 +62,9 @@ enum {
 #elif  defined(__AVR_ATmega328P__)
 
 enum {
-	pin_Receiver = 16,
-	pin_Transmitter = 17,
+	pin_Receiver = 19,		// new PCB! A3 vs A7
+	pin_Transmitter = 20,	// new PCB! A4 vs A6
+	pin_Antenna = 21,		// A5 aka PC5
 	pin_LED = 13,
 #ifdef DEBUG
 	/* Used in the mega project with the signal analyser */

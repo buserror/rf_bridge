@@ -60,6 +60,9 @@ ${O}/atmega328p_rf_bridge.axf: avr/rf_bridge_common.c
 rfbridge: ${O}/atmega2560_rf_bridge.axf
 	avrdude -p m2560 -c wiring -P /dev/ttyACM0 -D -Uflash:w:$^
 
+rfbridge328: ${O}/atmega328p_rf_bridge.axf
+	avrdude -p m328p -b 57600 -c arduino -P /dev/ttyUSB1 -D -Uflash:w:$^
+
 ${O}/rf_bridged: ${wildcard src/*.c}
 	${E}echo CC ${^}
 	${E}${CC} -o $@ -MMD -std=gnu99 -g -Og ${EXTRA_CFLAGS} \
