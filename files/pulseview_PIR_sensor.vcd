@@ -5,7 +5,7 @@ $comment
 $end
 $timescale 1000 ns $end
 $scope module libsigrok $end
-$var wire 1 ! iogH:5 $end
+$var wire 1 ! iogH_5 $end
 $upscope $end
 $enddefinitions $end
 #0 0!

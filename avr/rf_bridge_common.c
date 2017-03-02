@@ -104,46 +104,73 @@ enum {
 };
 volatile uint8_t transceiver_mode = mode_Receiving;
 
+const uint8_t timer_mask = (1 << OCIE0A) | (1 << OCIE0B);
+
+static inline void disable_transceiver()
+{
+	transceiver_mode = mode_Idle;
+	TIMSK0 &= ~timer_mask;
+}
+
+static inline void enable_receiver()
+{
+	if ((TIMSK0 & timer_mask) == (1 << OCIE0A))
+		return;
+	TIMSK0 &= ~timer_mask;
+	pin_clr(pin_Antenna);
+	transceiver_mode = mode_Receiving;
+	TIMSK0 |= (1 << OCIE0A);
+}
+
+static inline void enable_transmitter()
+{
+	if ((TIMSK0 & timer_mask) == (1 << OCIE0B))
+		return;
+	TIMSK0 &= ~((1 << OCIE0A) | (1 << OCIE0B));
+	pin_set(pin_Antenna);
+	transceiver_mode = mode_StartTransmit;
+	TIMSK0 |= (1 << OCIE0B);
+}
+
 /*
  * This is the 'sensitive' part here. Nothing fancy, everything needs
  * to be quick as the frequency of the timer is quite high; so in receive
  * mode we just do some filtered edge detection (cheaply).
- *
- * On transmit we just go over the buffer setting the output state as we
- * go along, decrementing remaining pulses as we go forward.
- * The 'current' pulse is mirrors, so the message can be replayed.
  */
 ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 {
 	static uint8_t bit = 0;			// bool
-	static uint8_t shifter = 0;		// shift register for edge detect
+	static uint8_t b;
+
+	b = pin_get(pin_Receiver);
+
+	/* increment the pulse count for the phase (bit) we are in */
+	if (pulse[current_pulse][b] < 127)
+		pulse[current_pulse][b]++;
+	/* if raising edge, switch pulse counter to the next one */
+	if (!bit && b) {
+		/* if tiny pulse, just ignore it */
+		if (pulse[current_pulse][0] + pulse[current_pulse][1] > 20)
+			current_pulse++;
+		pulse[current_pulse][0] = pulse[current_pulse][1] = 0;
+	}
+	bit = b;
+	D(pin_set_to(pin_Debug0, bit);)
+
+	tickcount++;
+}
+
+/*
+ * On transmit we just go over the buffer setting the output state as we
+ * go along, decrementing remaining pulses as we go forward.
+ * The 'current' pulse is mirrors, so the message can be replayed.
+ */
+ISR(TIMER0_COMPB_vect)	// handler for Output Compare 1 overflow interrupt
+{
+	static uint8_t bit = 0;			// bool
 	static uint8_t tp[2];			// temp pulse
 
-	D(pin_set(pin_Debug2);)
-
 	switch (transceiver_mode) {
-		case mode_Receiving: {
-			/* debouncing, wait until we got clear levels to
-			 * change the real 'bit' value */
-			static uint8_t b;
-			b = pin_get(pin_Receiver);
-			shifter = (shifter << 1) | b;
-			if ((shifter & 0x07) == 0x07)
-				b = 1;
-			else if ((shifter & 0x07) == 0x0)
-				b = 0;
-
-			/* increment the pulse count for the phase (bit) we are in */
-			if (pulse[current_pulse][b] < 127)
-				pulse[current_pulse][b]++;
-			/* if raising edge, switch pulse counter to the next one */
-			if (!bit && b) {
-				current_pulse++;
-				pulse[current_pulse][0] = pulse[current_pulse][1] = 0;
-			}
-			bit = b;
-			D(pin_set_to(pin_Debug0, bit);)
-		}	break;
 		case mode_Transmitting: {
 			if (tp[bit])
 				tp[bit]--;
@@ -171,10 +198,8 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 			pin_set_to(pin_Transmitter, 1);
 		}	break;
 	}
-	D(pin_clr(pin_Debug2);)
 
 	tickcount++;
-	sei();
 }
 
 // absolute value substraction for durations etc
@@ -234,14 +259,14 @@ AVR_CR(cr_syncsearch)
 				 * this bit tries to adapt with manchester sequences that
 				 * don't start with a series of 'zeroes'...
 				 */
-				if (abs_sub(p0 / 2, p1) < 4) {
+				if (abs_sub(p0 / 2, p1) < (d / 16)) {
 					p0 /= 2;
 					d = p0 + p1;
-					m++;
-				} else if (abs_sub(p0, p1 / 2) < 4) {
+				//	m++;
+				} else if (abs_sub(p0, p1 / 2) < (d / 32)) {
 					p1 /= 2;
 					d = p0 + p1;
-					m++;
+				//	m++;
 				}
 //			}
 #endif
@@ -250,7 +275,9 @@ AVR_CR(cr_syncsearch)
 				syncduration = d;
 				synclen = 0;
 				manchester = 0;
+				D(pin_clr(pin_Debug2);)
 			} else {
+				D(pin_set(pin_Debug2);)
 				if (abs_sub(p1, p0) < 12)
 					m++;
 				manchester += m;
@@ -263,25 +290,29 @@ AVR_CR(cr_syncsearch)
 			pi++;
 		}
 
+		uint8_t newstate = state_SyncSearch;
 		if (synclen == 6) {
 			D(pin_set(pin_Debug1);)
 			msg_start = syncstart;
 
-			if (flags.display_pulses)
-				running_state = state_DecodeRawPulses;
-			else if (manchester > 5)
-				running_state = state_Decoding_Manchester;
-			else
-				running_state = state_Decoding_ASK;
-			// init decoders
 			chk = 0x55;
 			bcount = 0;
 			byte = 0;
 			msg_end = 0;
-			D(pin_clr(pin_Debug1);)
+			if (flags.display_pulses)
+				newstate = state_DecodeRawPulses;
+			else if (manchester > 5)
+				newstate = state_Decoding_Manchester;
+			else
+				newstate = state_Decoding_ASK;
+			// init decoders
+printf("Decode #%d d %d m %d = %d\n",
+		syncstart, syncduration, manchester, running_state);
 		}
-		if (running_state != state_SyncSearch) {
+		if (newstate != state_SyncSearch) {
+			running_state = newstate;
 			cr_yield(0);
+		//	D(pin_clr(pin_Debug1);)
 			synclen = manchester = syncduration = 0;
 			pi = msg_start;// play catchup
 		}
@@ -435,7 +466,8 @@ AVR_CR(cr_decode_pulses)
 /*
  * Reads a character from the uart FIFO, return 0xff if we timeouted
  */
-uint8_t uart_recv()
+static uint8_t
+uart_recv()
 {
 	uint16_t timeout = 0;
 	uint8_t tick = tickcount;
@@ -453,7 +485,8 @@ uint8_t uart_recv()
 /* Receive from the uart, matching a string in flash, eventually returns
  * zero if we matched, or the non-matching character if not.
  */
-static uint8_t recv_match_string_P(
+static uint8_t
+recv_match_string_P(
 		const char * w)
 {
 	uint8_t i = 0;
@@ -471,7 +504,8 @@ static uint8_t recv_match_string_P(
  * Return 0 if a double character hex value was decoded, otherwise,
  * return the character that was received (or 0xff for timeout)
  */
-static uint8_t getsbyte(
+static uint8_t
+getsbyte(
 		uint8_t * res )
 {
 	uint8_t cnt = 0;
@@ -488,6 +522,30 @@ static uint8_t getsbyte(
 	return 0;
 }
 
+static void
+transmit_message()
+{
+	pulse[bcount][0] = 127; // long low pulse
+	pulse[bcount][1] = 0;
+	bcount++;
+	pulse[bcount][0] = 127; // long low pulse
+	pulse[bcount][1] = 0;
+	msg_end = bcount + 1;
+	msg_start = 0;
+	if (msg_end <= 16)	// too small, don't bother
+		return;
+	uint8_t retries = 3;
+	while (retries--) {
+		enable_transmitter();
+		// switch antenna to the TX
+		while (transceiver_mode != mode_Idle) {
+			cr_yield(1);
+		}
+		disable_transceiver();
+	}
+	enable_receiver();
+}
+
 /*
  * This is not meant to be terribly pretty, it's made to be small, use
  * almost no sram and the minimal amount of stack. Thus the goto's
@@ -501,13 +559,13 @@ AVR_CR(cr_receive_cmd)
 		cr_yield(0);
 		uint8_t state = 0;
 		uint8_t err = 0;
-		static uint8_t b;
+		uint8_t b;
 		static uint8_t byte;
 
 		b = uart_recv();
 		if (b == 0xff)
 			goto again;
-		transceiver_mode = mode_Idle;
+		disable_transceiver();
 		if (b == 'M') {
 			uint8_t msg_type = uart_recv();
 			if (msg_type == 0xff)
@@ -530,7 +588,6 @@ AVR_CR(cr_receive_cmd)
 			uint8_t chk = 0x55;
 			do {
 				b = uart_recv();
-
 newkey:
 				switch(b) {
 				case ':': /* raw data */
@@ -558,37 +615,20 @@ newkey:
 						}
 					} while (1);
 					break;
-				case '*': /* checksum */
+				case '*': { /* checksum */
 					if (getsbyte(&b))
 						goto skipline;
 				//	printf_P(PSTR("< %d chk %02x/%02x\n"),
 				//			current_pulse, b, chk);
 					if (b == chk) {
 						state++;
-						pulse[bcount][0] = 127; // long low pulse
-						pulse[bcount][1] = 0;
-						bcount++;
-						pulse[bcount][0] = 127; // long low pulse
-						pulse[bcount][1] = 0;
-						msg_end = bcount + 1;
-						msg_start = 0;
-						if (msg_end <= 16)	// too small, don't bother
-							goto skipline;
-						b = 3; // retries
-						while (b--) {
-							// switch antenna to the TX
-							pin_set(pin_Antenna);
-							transceiver_mode = mode_StartTransmit;
-							while (transceiver_mode != mode_Idle) {
-								cr_yield(1);
-							}
-						}
+						transmit_message();
 						goto skipline;
 					} else {
 						err = '*';
 						goto skipline;
 					}
-					break;
+				}	break;
 				case '!': /* pulse duration */
 					if (getsbyte(&syncduration))
 						goto skipline;
@@ -632,7 +672,7 @@ skipline:
 			b = uart_recv();
 		if (err) printf_P(PSTR("!%d\n"), err);
 		else if (state) printf_P(PSTR("*OK\n"));
-#ifdef SIMAVR
+#if 0 // def SIMAVR
 		b = 255;
 		while (b--) {
 			sleep_cpu();
@@ -641,7 +681,7 @@ skipline:
 #endif
 again:
 		/* release builtin pullup on antenna switch */
-		pin_clr(pin_Antenna);
+		enable_receiver();
 		running_state = state_SyncSearch;
 		msg_start = msg_end = current_pulse = 0;
 	} while (1);

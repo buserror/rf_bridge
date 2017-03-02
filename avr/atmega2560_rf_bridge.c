@@ -54,12 +54,13 @@ AVR_MCU_VCD_PORT_PIN('H', 4, "TX"); // transmitter
 AVR_MCU_VCD_PORT_PIN('H', 5, "RX"); // receiver
 AVR_MCU_VCD_PORT_PIN('E', 4, ""); // Debug0
 AVR_MCU_VCD_PORT_PIN('E', 5, ""); // Debug1
+AVR_MCU_VCD_PORT_PIN('G', 5, ""); // Debug2
 
 AVR_MCU_VCD_IRQ(TIMER0_COMPA);
+AVR_MCU_VCD_IRQ(TIMER0_COMPB);
 AVR_MCU_VCD_IRQ(USART0_UDRE);
-AVR_MCU_VCD_IRQ(USART0_RX);
-
-AVR_MCU_VCD_ALL_IRQ();
+//AVR_MCU_VCD_IRQ(USART0_RX);
+//AVR_MCU_VCD_ALL_IRQ();
 
 #endif
 
@@ -91,7 +92,7 @@ int main()
 	TCCR0A = (1 << WGM01); // CTC mode
 	TCCR0B = (1 << CS01);
 	OCR0A = 0x3d / 2;
-    TIMSK0  |= (1 << OCIE0A);
+	OCR0B = 0x3d / 2;
 
 #ifdef DEBUG
 	// debug pins for logic analyser
