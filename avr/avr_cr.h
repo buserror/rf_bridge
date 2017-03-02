@@ -104,7 +104,7 @@ extern avr_cr * 	cr_current;
 #endif
 
 #define AVR_CR(_name) \
-	void _name(void) __attribute__((noreturn)) __attribute__((naked));\
+	void _name(void) __attribute__((noreturn));\
 	void _name(void)
 
 /*
