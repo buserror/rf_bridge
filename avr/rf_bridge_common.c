@@ -76,7 +76,9 @@ volatile uint8_t	running_state = state_SyncSearch;
 /* Flag: Are we displaying raw pulses, or already decoded messages */
 struct {
 	uint8_t display_pulses: 1, display_stacks: 1;
-} flags;
+} flags = {
+	.display_pulses = 0,
+};
 
 volatile uint8_t tickcount = 0;
 
@@ -132,6 +134,8 @@ static inline void enable_transmitter()
 	TIMSK0 |= (1 << OCIE0B);
 }
 
+#define MAX_TICKS_PER_PHASE 255
+
 /*
  * This is the 'sensitive' part here. Nothing fancy, everything needs
  * to be quick as the frequency of the timer is quite high; so in receive
@@ -145,7 +149,7 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 	b = pin_get(pin_Receiver);
 
 	/* increment the pulse count for the phase (bit) we are in */
-	if (pulse[current_pulse][b] < 127)
+	if (pulse[current_pulse][b] < MAX_TICKS_PER_PHASE)
 		pulse[current_pulse][b]++;
 	/* if raising edge, switch pulse counter to the next one */
 	if (!bit && b) {
@@ -242,34 +246,31 @@ AVR_CR(cr_syncsearch)
 	uint8_t synclen = 0;
 	uint8_t manchester = 0;
 	do {
-		while (pi == current_pulse) {
-			if (synclen == 0) {
-				if (!uart_rx_isempty(&uart_rx))
-					running_state = state_ReceivingCommand;
+		while (pi == current_pulse || running_state != state_SyncSearch) {
+			if (running_state == state_SyncSearch) {
+				if (synclen == 0) {
+					if (!uart_rx_isempty(&uart_rx))
+						running_state = state_ReceivingCommand;
+				}
 			}
 			cr_yield(0);
 		}
 		while (pi != current_pulse && synclen < 6) {
 			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
-			uint8_t d = p0 + p1;
+			uint16_t d = p0 + p1;
 			uint8_t m = 0;
-#if 1
-//			if (synclen == 0 || manchester) {
-				/*
-				 * this bit tries to adapt with manchester sequences that
-				 * don't start with a series of 'zeroes'...
-				 */
-				if (abs_sub(p0 / 2, p1) < (d / 16)) {
-					p0 /= 2;
-					d = p0 + p1;
-				//	m++;
-				} else if (abs_sub(p0, p1 / 2) < (d / 32)) {
-					p1 /= 2;
-					d = p0 + p1;
-				//	m++;
-				}
-//			}
-#endif
+
+			/*
+			 * this bit tries to adapt with manchester sequences that
+			 * don't start with a series of 'zeroes'...
+			 */
+			if (abs_sub(p0 / 2, p1) < (d / 16)) {
+				p0 /= 2;
+				d = p0 + p1;
+			} else if (abs_sub(p0, p1 / 2) < (d / 32)) {
+				p1 /= 2;
+				d = p0 + p1;
+			}
 			if (d < 0x20 || abs_sub(d, syncduration) > 8) {
 				syncstart = pi;
 				syncduration = d;
@@ -290,8 +291,8 @@ AVR_CR(cr_syncsearch)
 			pi++;
 		}
 
-		uint8_t newstate = state_SyncSearch;
 		if (synclen == 6) {
+			uint8_t newstate = state_SyncSearch;
 			D(pin_set(pin_Debug1);)
 			msg_start = syncstart;
 
@@ -306,13 +307,10 @@ AVR_CR(cr_syncsearch)
 			else
 				newstate = state_Decoding_ASK;
 			// init decoders
-printf("Decode #%d d %d m %d = %d\n",
-		syncstart, syncduration, manchester, running_state);
-		}
-		if (newstate != state_SyncSearch) {
-			running_state = newstate;
-			cr_yield(0);
-		//	D(pin_clr(pin_Debug1);)
+			if (newstate != state_SyncSearch)
+				running_state = newstate;
+			while (running_state != state_SyncSearch)
+				cr_yield(1);
 			synclen = manchester = syncduration = 0;
 			pi = msg_start;// play catchup
 		}
@@ -363,7 +361,7 @@ AVR_CR(cr_decode_ask)
 				while (pi != current_pulse && !msg_end) {
 					uint8_t b = pulse[pi][1] > pulse[pi][0];
 					D(pin_set_to(pin_Debug3, b);)
-					msg_end = pulse[pi][0] >= 127;
+					msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
 					stuffbit(b, msg_end);
 					pi++;
 					D(pin_set_to(pin_Debug3, 0);)
@@ -407,7 +405,7 @@ AVR_CR(cr_decode_manchester)
 			 * that is more than a demi syncduration.
 			 */
 			while (pi != current_pulse && !msg_end) {
-				msg_end = pulse[pi][0] >= 127;
+				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
 
 				if (stuffclock != demiclock) {
 					if (stuffclock & 1)
@@ -451,15 +449,15 @@ AVR_CR(cr_decode_pulses)
 			while (pi == current_pulse)
 				cr_yield(0);
 			while (pi != current_pulse && !msg_end) {
-				msg_end = pulse[pi][0] >= 127;
+				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
 				printf_P(PSTR("%02x%02x"), pulse[pi][1], pulse[pi][0]);
 				chk += pulse[pi][1] + pulse[pi][0];
 				bcount++;
 				pi++;
 			}
 		} while (!msg_end);
-		running_state = state_DecodeDone;
 		msg_start = pi;
+		running_state = state_DecodeDone;
 	} while (1);
 }
 
@@ -525,10 +523,7 @@ getsbyte(
 static void
 transmit_message()
 {
-	pulse[bcount][0] = 127; // long low pulse
-	pulse[bcount][1] = 0;
-	bcount++;
-	pulse[bcount][0] = 127; // long low pulse
+	pulse[bcount][0] = MAX_TICKS_PER_PHASE; // long low pulse
 	pulse[bcount][1] = 0;
 	msg_end = bcount + 1;
 	msg_start = 0;
@@ -757,7 +752,7 @@ void rf_bridge_run()
 			case state_DecodeDone: {
 				chk += bcount;
 				chk += syncduration;
-				if (bcount)
+				//if (bcount)
 					printf_P(PSTR("#%02x!%0x*%02x\n"),
 							bcount, syncduration, chk);
 				running_state = state_SyncSearch;
