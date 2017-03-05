@@ -1,12 +1,18 @@
-
+# rf_bridge: MQTT <-> RF 433Mhz Bridge for switches and sensors.
 This project implements a RF bridge for 433Mhz devices. The idea is to have a small AVR do the mod/demod and send diggested messages on it's serial port to a linux box for processing; in this case bridging sensors and switches to a MQTT broker.
 
 This was made to interface my cheap RF433 gizmoz (wall switches, outlets, temperature sensors etc) to the home automation, and ultimately the Amazon echo/Alexa.
 
 The fact the AVR does all the sensitive bits means the linux program doesn't eat a lot of CPU and can concentrate on the applicative parts, which is the MQTT bridging.
 
+<p align="center">
+<img align="center" alt="Finished project" src="kicad/rf_bridge_assembled.jpg" width=800>
+<p align="center">Finished Project (Minus case)</p>
+</p>
+
+
 ## The AVR Bits
-The firmware can run on anything with about 2KB of SRAM (currently uses ~1300 bytes), and a clock of 16Mhz. The firmware 'samples' the RF signal from the 433 module at about 64khz and tries to detect edges, then regular pulses, then does some decoding until a 'long low pulse', and forwards it on.
+The firmware can run on anything with about 2KB of SRAM (currently uses <1300 bytes), and a clock of 16Mhz. The firmware 'samples' the RF signal from the 433 module at about 64khz and tries to detect edges, then regular pulses, then does some decoding until a 'long low pulse', and forwards it on.
 
 The firmware can also transmit (altho this part isn't finished, only ASK is working for now) using the same message format. The code doesn't try to be too clever and has a 'raw' mode it can be switches into to forward raw pulses straight to the host for analysis. 
 
@@ -36,12 +42,14 @@ The reason the timer clock is returned is to be able to reply the message back. 
 ## The Linux Bits
 The linux bit sits on the serial port, reads diggested messages and 'maps' them to MQTT messages. For dumb on/off switches it uses a file containing the mapping; but there is an extra decoder for the temperature/humidity sensor. The mapping is'nt terribly clever and use a flat file. 
 
-The linux process uses libmosquitto to connect to a broker. I might try to do away with the libmosquitto requirement, as I don't think I need all the features (and footprint) it brings. I just need a unsecured connection to a broker, and let the broker be 'clever' and do encryption bridging if needs be.
+The linux process uses libmosquitto to connect to a MQTT broker. I might try to do away with the libmosquitto requirement, as I don't think I need all the features (and footprint) it brings. I just need a unsecured connection to a broker, and let the broker be 'clever' and do encryption bridging if needs be.
 
-The linux bit also subscribes to the mapped messages, and when it received a MQTT notification that hasn't been sent by itself, it just passes it on to the AVR board for transmisssions. That means you can have a Dashboard with switches, or use Alexa etc to send the messages on the RF link. No need for a web interface etc, just use MQTT.
+The linux bit also subscribes to the mapped messages, and when it received a MQTT notification that hasn't been sent by itself, it just passes it on to the AVR board for transmisssions. That means you can have a Dashboard with switches, or use Amazon Alexa etc to send the messages on the RF link. No need for a web interface etc, just use MQTT. I personally use Node-Red to do the Alexa Logic bits.
 
 ## The Hardware Bits
-Need to finish that -- current prototype uses an Arduino Mega and a RF433 receiver + transmitter. I ended up using 2 antennas separated by about 20cm on the prototype, it works, even if the receiver is a bit overwelmed for a little while after I transmit anything. It otherwises requires no extra hardware. The only thing I did was add a 100Ohm resistor in series with the receiver output, as I was seeing a lot of ringing on the oscilloscope.
+Note: The hardware has [it's own page](kicad/README.md).
+
+For prototyping I used an Arduino Mega and a RF433 receiver + transmitter. I ended up using 2 antennas separated by about 20cm on the prototype, it works, even if the receiver is a bit overwelmed for a little while after I transmit anything. It otherwises requires no extra hardware. The only thing I did was add a 100R resistor in series with the receiver output, as I was seeing a lot of ringing on the oscilloscope.
 
 The 'real' hardware will be an Arduino nano v3.0 with an Atmega 328p. Powered via the USB port. I've designed a board using Kicad already, and the PCBs are on the way. https://oshpark.com/shared_projects/ZqEOBR2t
 Hardware uses a NXP RF switch for sharing an antenna in half-duplex, and apart from a bit of filtering that's about it! More later.

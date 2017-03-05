@@ -1,0 +1,16 @@
+U1,SA630,rf_bridge-cache,SA630
+C2,10nF,device,C
+C3,10nF,device,C
+C4,10nF,device,C
+C1,10nF,device,C
+R1,10K,device,R
+P1,CONN_01X08,conn,CONN_01X08
+P2,RF_TX,conn,CONN_01X04
+P3,RF_RX1,conn,CONN_01X04
+P4,RF_RX2,conn,CONN_01X04
+C5,100nF,device,C
+C6,4.7uF,device,C
+P5,BNC,conn,BNC
+C7,10nF,device,C
+R2,100,device,R
+C8,10pF,device,C
