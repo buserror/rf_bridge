@@ -111,6 +111,7 @@ const uint8_t timer_mask = (1 << OCIE0A) | (1 << OCIE0B);
 static inline void disable_transceiver()
 {
 	transceiver_mode = mode_Idle;
+	pin_clr(pin_Antenna);
 	TIMSK0 &= ~timer_mask;
 }
 
@@ -153,13 +154,22 @@ ISR(TIMER0_COMPA_vect)	// handler for Output Compare 0 overflow interrupt
 		pulse[current_pulse][b]++;
 	/* if raising edge, switch pulse counter to the next one */
 	if (!bit && b) {
+#if defined(SIMAVR) && defined(M2560)
+			D(SPCR = pulse[current_pulse][0]);
+#endif
 		/* if tiny pulse, just ignore it */
-		if (pulse[current_pulse][0] + pulse[current_pulse][1] > 20)
+		if (pulse[current_pulse][0] > 20 || pulse[current_pulse][1] > 20)
 			current_pulse++;
 		pulse[current_pulse][0] = pulse[current_pulse][1] = 0;
 	}
+#if defined(SIMAVR) && defined(M2560)
+	else if (bit && !b) {
+			D(SPCR = pulse[current_pulse][1];)
+	}
+	D(SPSR = current_pulse;)
+#endif
 	bit = b;
-	D(pin_set_to(pin_Debug0, bit);)
+//	D(pin_set_to(pin_Debug0, bit);)
 
 	tickcount++;
 }
@@ -216,6 +226,7 @@ uint8_t syncduration = 0;
 uint8_t chk = 0, byte = 0;
 uint8_t bcount = 0;
 uint8_t msg_type = 'P';
+uint8_t decoded = 0;		// ask is tried first, and validates
 
 /*
  * stuff the next bit in the 8 bits buffer, and output it when full.
@@ -233,6 +244,8 @@ static void stuffbit(uint8_t b, uint8_t last) {
 		byte = 0;
 	}
 }
+
+#define SYNC_LEN 8
 
 /*
  * Search for 8 pulses of ~equal duration. Even manchester starts with
@@ -255,7 +268,7 @@ AVR_CR(cr_syncsearch)
 			}
 			cr_yield(0);
 		}
-		while (pi != current_pulse && synclen < 6) {
+		while (pi != current_pulse && synclen < SYNC_LEN) {
 			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
 			uint16_t d = p0 + p1;
 			uint8_t m = 0;
@@ -264,12 +277,17 @@ AVR_CR(cr_syncsearch)
 			 * this bit tries to adapt with manchester sequences that
 			 * don't start with a series of 'zeroes'...
 			 */
-			if (abs_sub(p0 / 2, p1) < (d / 16)) {
-				p0 /= 2;
-				d = p0 + p1;
-			} else if (abs_sub(p0, p1 / 2) < (d / 32)) {
-				p1 /= 2;
-				d = p0 + p1;
+			if (d > 0x70) {
+				if (abs_sub(p0 / 2, p1) < (d / 8)) {
+					p0 /= 2;
+					d = p0 + p1;
+				} else if (abs_sub(p0, p1 / 2) < (d / 8)) {
+					p1 /= 2;
+					d = p0 + p1;
+				} else if (abs_sub(d/2, syncduration) < (d / 16)) {
+					p1 /= 2; p0 /= 2;
+					d /= 2;
+				}
 			}
 			if (d < 0x20 || abs_sub(d, syncduration) > 8) {
 				syncstart = pi;
@@ -279,7 +297,7 @@ AVR_CR(cr_syncsearch)
 				D(pin_clr(pin_Debug2);)
 			} else {
 				D(pin_set(pin_Debug2);)
-				if (abs_sub(p1, p0) < 12)
+				if (abs_sub(p1, p0) < (d / 8))
 					m++;
 				manchester += m;
 				/* Integrate half the difference with previous cycle,
@@ -291,28 +309,44 @@ AVR_CR(cr_syncsearch)
 			pi++;
 		}
 
-		if (synclen == 6) {
+		if (synclen == SYNC_LEN) {
 			uint8_t newstate = state_SyncSearch;
 			D(pin_set(pin_Debug1);)
-			msg_start = syncstart;
 
-			chk = 0x55;
-			bcount = 0;
-			byte = 0;
-			msg_end = 0;
 			if (flags.display_pulses)
 				newstate = state_DecodeRawPulses;
-			else if (manchester > 5)
+			else if (manchester > 4)
 				newstate = state_Decoding_Manchester;
 			else
 				newstate = state_Decoding_ASK;
 			// init decoders
-			if (newstate != state_SyncSearch)
+			while (newstate != state_SyncSearch) {
+				msg_start = syncstart;
+
+				chk = 0x55;
+				bcount = 0;
+				byte = 0;
+				msg_end = 0;
+				decoded = 0;
 				running_state = newstate;
-			while (running_state != state_SyncSearch)
-				cr_yield(1);
+
+				while (running_state != state_SyncSearch)
+					cr_yield(1);
+				/*
+				 * if ASK fails (it's strict) and we had a small
+				 * chance of doing some manchester, well, try again
+				 * with manchester, you never know
+				 */
+				if (newstate == state_Decoding_ASK &&
+						manchester && !decoded) {
+					newstate = state_Decoding_Manchester;
+				} else
+					break;
+			}
 			synclen = manchester = syncduration = 0;
 			pi = msg_start;// play catchup
+			syncstart = pi+1;
+			D(pin_clr(pin_Debug1);)
 		}
 	} while (1);
 }
@@ -392,7 +426,7 @@ AVR_CR(cr_decode_manchester)
 		uint8_t bit = 0, phase = 1;
 		uint8_t demiclock = 0;
 		uint8_t stuffclock = 0;
-		uint8_t margin = syncduration / 4;
+		uint8_t margin = (syncduration / 4) + (syncduration / 16);
 
 		do {
 			// wait for bits
@@ -687,11 +721,11 @@ again:
  * you have enabled STACK_DEBUG. The stacks are trimmed to the minimum
  * needed, so any strange behaviour should be looked at here, first
  */
-AVR_TASK(syncsearch, 48 * 2);
-AVR_TASK(decode_ask, 108);
-AVR_TASK(decode_manchester, 108);
-AVR_TASK(decode_pulses, 48 * 2);
-AVR_TASK(receive_cmd, 96 * 2);
+AVR_TASK(syncsearch, 64);
+AVR_TASK(decode_ask, 100);
+AVR_TASK(decode_manchester, 100);
+AVR_TASK(decode_pulses, 64);
+AVR_TASK(receive_cmd, 100);
 
 void rf_bridge_run() __attribute__((noreturn)) __attribute__((naked));
 
@@ -705,7 +739,6 @@ void rf_bridge_run()
 
 	// open drain antenna pin. Not sure of switch polarity for now
 	pin_input(pin_Antenna);
-
 	sei();
 	printf_P(PSTR("* Starting RF Firmware\n"));
 
@@ -732,9 +765,11 @@ void rf_bridge_run()
 	cr_start(decode_pulses, cr_decode_pulses);
 	cr_start(receive_cmd, cr_receive_cmd);
 
+	enable_receiver();
+
 	while (1) {
 		sleep_cpu(); // wakes after a timer tick, or UART etc
-
+		D(GPIOR1 = running_state;)
 		switch (running_state) {
 			case state_SyncSearch:
 				transceiver_mode = mode_Receiving;

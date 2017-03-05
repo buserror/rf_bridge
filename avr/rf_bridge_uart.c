@@ -41,6 +41,12 @@
 #include "avr_cr.h"
 #include "rf_bridge_uart.h"
 
+#ifdef DEBUG
+#define D(w) w
+#else
+#define D(w)
+#endif
+
 uart_tx_t uart_tx;
 uart_rx_t uart_rx;
 
@@ -67,6 +73,7 @@ int uart_putchar(char c, FILE *stream)
 {
 	if (c == '\n')
 		uart_putchar('\r', stream);
+	D(GPIOR2 = c;)
 	while (uart_tx_isfull(&uart_tx)) {
 		UCSR0B |= (1 << UDRIE0); // make sure we don't stall
 		if (cr_current)

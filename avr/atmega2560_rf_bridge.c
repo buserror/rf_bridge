@@ -52,15 +52,28 @@ AVR_MCU(F_CPU, "atmega2560");
 
 AVR_MCU_VCD_PORT_PIN('H', 4, "TX"); // transmitter
 AVR_MCU_VCD_PORT_PIN('H', 5, "RX"); // receiver
-AVR_MCU_VCD_PORT_PIN('E', 4, ""); // Debug0
-AVR_MCU_VCD_PORT_PIN('E', 5, ""); // Debug1
-AVR_MCU_VCD_PORT_PIN('G', 5, ""); // Debug2
+AVR_MCU_VCD_PORT_PIN('H', 3, "Antenna"); // pin_Antenna
+AVR_MCU_EXTERNAL_PORT_PULL('H', (1 << 3), 0); // pulldown here
+AVR_MCU_VCD_PORT_PIN('E', 4, "Debug0"); // Debug0
+AVR_MCU_VCD_PORT_PIN('E', 5, "Decode"); // Debug1
+AVR_MCU_VCD_PORT_PIN('G', 5, "Sync"); // Debug2
 
 AVR_MCU_VCD_IRQ(TIMER0_COMPA);
 AVR_MCU_VCD_IRQ(TIMER0_COMPB);
 AVR_MCU_VCD_IRQ(USART0_UDRE);
-//AVR_MCU_VCD_IRQ(USART0_RX);
-//AVR_MCU_VCD_ALL_IRQ();
+//AVR_MCU_VCD_IRQ_PENDING(USART0_UDRE);
+//AVR_MCU_VCD_ALL_IRQ_PENDING();
+
+const struct avr_mmcu_vcd_trace_t _mytrace[]  _MMCU_ = {
+	{ AVR_MCU_VCD_SYMBOL("UDR0"), .what = (void*)&UDR0, },
+	{ AVR_MCU_VCD_SYMBOL("UDRE0"), .mask = (1 << UDRE0), .what = (void*)&UCSR0A, },
+	{ AVR_MCU_VCD_SYMBOL("UDRIE0"), .mask = (1 << UDRIE0), .what = (void*)&UCSR0B, },
+	{ AVR_MCU_VCD_SYMBOL("GPIOR1"), .what = (void*)&GPIOR1, },
+	{ AVR_MCU_VCD_SYMBOL("GPIOR2"), .what = (void*)&GPIOR2, },
+	/* we subvert these two registers as debug for simavr traces */
+	{ AVR_MCU_VCD_SYMBOL("Pulse"), .what = (void*)&SPSR, },
+	{ AVR_MCU_VCD_SYMBOL("Duration"), .what = (void*)&SPCR, },
+};
 
 #endif
 

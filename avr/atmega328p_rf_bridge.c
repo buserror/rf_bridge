@@ -79,7 +79,7 @@ int main()
 	TCCR0A = (1 << WGM01); // CTC mode
 	TCCR0B = (1 << CS01);
 	OCR0A = 0x3d / 2;
-    TIMSK0  |= (1 << OCIE0A);
+	OCR0B = 0x3d / 2;
 
 #ifdef DEBUG
 	// debug pins for logic analyser
