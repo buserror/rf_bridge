@@ -32,8 +32,8 @@ C4,C7|10nF|0603 Caps.|
 |C6|4.7uF|0805 Capacitor (Optional)|
 |C8|10pF|0603 Cap (Optional)|
 |P1|Nano|Arduino. Use 90 headers. We only use a 8 section of them, and the headers are NOT soldered from the first pin, but from the pin marked 5V on the Nano.|
-|P2|RF_TX||Both the TX and the RX comes from eBay
-|P3,P4|RF_RX||
+|P2|RF_TX|Both the TX and the RX comes from eBay.|
+|P3,P4|RF_RX|[These](http://www.ebay.co.uk/itm/331805856615) are the exact modules I used|
 |P5|U.FR|SMT 'pigtail' antenna Connector [Hirose U.FL](http://uk.farnell.com/hirose-hrs/u-fl-r-smt-1-10/rf-coaxial-u-fl-straight-jack/dp/1688077)|
 |R1|10K|0603 Pulldown|
 |R2|100|0603 Filtering, use anytime you like here even R0|
