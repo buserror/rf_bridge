@@ -1,4 +1,4 @@
-# rf_bridge: MQTT <-> RF 433Mhz Bridge for switches and sensors.
+# Home Automation: MQTT <-> RF 433Mhz Bridge for switches and sensors.
 This project implements a RF bridge for 433Mhz devices. The idea is to have a small AVR do the mod/demod and send diggested messages on it's serial port to a linux box for processing; in this case bridging sensors and switches to a MQTT broker.
 
 This was made to interface my cheap RF433 gizmoz (wall switches, outlets, temperature sensors etc) to the home automation, and ultimately the Amazon echo/Alexa.
@@ -45,6 +45,8 @@ The linux bit sits on the serial port, reads diggested messages and 'maps' them 
 The linux process uses libmosquitto to connect to a MQTT broker. I might try to do away with the libmosquitto requirement, as I don't think I need all the features (and footprint) it brings. I just need a unsecured connection to a broker, and let the broker be 'clever' and do encryption bridging if needs be.
 
 The linux bit also subscribes to the mapped messages, and when it received a MQTT notification that hasn't been sent by itself, it just passes it on to the AVR board for transmisssions. That means you can have a Dashboard with switches, or use Amazon Alexa etc to send the messages on the RF link. No need for a web interface etc, just use MQTT. I personally use Node-Red to do the Alexa Logic bits.
+
+The program can run on pretty much anything, it uses very very little resources, so a Raspberi Pi or anything else will work just fine!
 
 ## The Hardware Bits
 Note: The hardware has [it's own page](kicad/README.md).
