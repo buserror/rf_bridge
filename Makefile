@@ -19,7 +19,7 @@ endif
 
 AVR_SRC			:= $(wildcard avr/at*.c)
 AVR_OBJ			:= $(patsubst avr/%, ${O}/%, ${AVR_SRC:%.c=%.axf})
-EXTRA_CFLAGS	+= -Ishared
+EXTRA_CFLAGS	+= -Ishared -DDEBUG
 
 ifneq ($(SIMAVR),)
 EXTRA_CFLAGS	+= -DSIMAVR
@@ -58,10 +58,12 @@ ${O}/atmega328p_rf_bridge.axf: avr/rf_bridge_uart.c
 ${O}/atmega328p_rf_bridge.axf: avr/rf_bridge_common.c
 
 rfbridge: ${O}/atmega2560_rf_bridge.axf
-	avrdude -p m2560 -c wiring -P /dev/ttyACM0 -D -Uflash:w:$^
+	make clean && make && \
+		avrdude -p m2560 -c wiring -P /dev/ttyACM0 -D -Uflash:w:$^
 
 rfbridge328: ${O}/atmega328p_rf_bridge.axf
-	avrdude -p m328p -b 57600 -c arduino -P /dev/ttyUSB1 -D -Uflash:w:$^
+	make clean && make && \
+		avrdude -p m328p -b 57600 -c arduino -P /dev/ttyUSB1 -D -Uflash:w:$^
 
 ${O}/rf_bridged: ${wildcard src/*.c}
 	${E}echo CC ${^}

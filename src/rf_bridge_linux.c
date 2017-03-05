@@ -344,7 +344,7 @@ mq_message_cb(
 					if (o) {
 						msg_display(o, &m->msg, "");
 						fclose(o);
-						usleep(100000);
+						usleep(200000);
 					}
 				}
 			}
