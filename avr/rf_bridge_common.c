@@ -221,6 +221,10 @@ ISR(TIMER0_COMPB_vect)	// handler for Output Compare 1 overflow interrupt
 static uint8_t abs_sub(uint8_t v1, uint8_t v2) {
 	return v1 > v2? v1 - v2 : v2 - v1;
 }
+// overflow substraction for the counters
+uint8_t ovf_sub(uint8_t v1, uint8_t v2) {
+	return v1 > v2 ? 255 - v1 + v2 : v2 - v1;
+}
 
 /* used by the syncsearch, and used by the manchester decoder too */
 uint8_t syncduration = 0;
@@ -349,6 +353,78 @@ AVR_CR(cr_syncsearch)
 			syncstart = pi+1;
 			D(pin_clr(pin_Debug1);)
 		}
+	} while (1);
+}
+
+AVR_CR(cr_syncsearch_backward)
+{
+	uint8_t pi = current_pulse;
+
+	do {
+		while (pi == current_pulse || running_state != state_SyncSearch) {
+			if (running_state == state_SyncSearch) {
+			//	if (synclen == 0) {
+					if (!uart_rx_isempty(&uart_rx))
+						running_state = state_ReceivingCommand;
+			//	}
+			}
+			cr_yield(0);
+		}
+		uint8_t gotsync = 0;
+		while (pi != current_pulse && !gotsync) {
+			gotsync = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
+
+			if (gotsync)
+				msg_end = pi;
+		}
+		printf("gotsync %d at %d\n", gotsync, msg_end);
+		if (!gotsync)
+			continue;
+
+		/* Now walk backward for pulses that look interesting */
+
+		pi--;	// start one pulse before end
+		// get an arbitrary pulse size to get started
+		syncduration = 0;
+		uint8_t ook = 0, ask = 0, manchester = 0;
+		do {
+			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
+			uint16_t d = p0 + p1;
+
+			if (syncduration == 0)
+				syncduration = d;
+
+			if (d > 0x70)
+				ook++;
+
+			if (abs_sub(p0 / 2, p1) < (d / 16)) {
+				p0 /= 2;
+				d = p0 + p1;
+			} else if (abs_sub(p0, p1 / 2) < (d / 16)) {
+				p1 /= 2;
+				d = p0 + p1;
+			} else if (abs_sub(d/2, syncduration) < (d / 16)) {
+				p1 /= 2; p0 /= 2;
+				d /= 2;
+			}
+			if (syncduration == 0)
+				syncduration = d;
+
+			if (abs_sub(p1, p0) < (d / 8))
+				manchester++;
+			else if (abs_sub(d, syncduration) < 8)
+				ask++;
+			else {
+				// we're done! doesn't match any of this
+			}
+			pi--;
+		} while (pi != msg_end);
+
+		msg_start = pi + 1;
+		uint8_t count = ovf_sub(msg_end, msg_start);
+		printf("msg at %d is %d long ook:%d man:%d ask:%d\n",
+			msg_start, count, ook, manchester, ask);
+
 	} while (1);
 }
 
