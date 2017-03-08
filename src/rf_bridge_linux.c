@@ -48,6 +48,12 @@
 
 #ifdef MQTT
 #include <mosquitto.h>
+#if LIBMOSQUITTO_VERSION_NUMBER <= 16000
+#undef MQTT
+#endif
+#endif
+
+#ifdef MQTT
 #include <libgen.h>
 #include <unistd.h>
 #include <sys/types.h>
