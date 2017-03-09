@@ -37,6 +37,7 @@
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
+#include <avr/sleep.h>
 
 #include "avr_cr.h"
 #include "rf_bridge_uart.h"
@@ -76,8 +77,8 @@ int uart_putchar(char c, FILE *stream)
 	D(GPIOR2 = c;)
 	while (uart_tx_isfull(&uart_tx)) {
 		UCSR0B |= (1 << UDRIE0); // make sure we don't stall
-		if (cr_current)
-			cr_yield(1);
+	//	if (cr_current)	cr_yield(1);
+		sleep_cpu();
 	}
 	uart_tx_write(&uart_tx, c);
 	UCSR0B |= (1 << UDRIE0);

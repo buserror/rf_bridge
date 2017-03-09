@@ -231,7 +231,6 @@ uint8_t syncduration = 0;
 uint8_t chk = 0, byte = 0;
 uint8_t bcount = 0;
 uint8_t msg_type = 'P';
-uint8_t decoded = 0;		// ask is tried first, and validates
 
 /*
  * stuff the next bit in the 8 bits buffer, and output it when full.
@@ -250,112 +249,6 @@ static void stuffbit(uint8_t b, uint8_t last) {
 	}
 }
 
-#define SYNC_LEN 8
-
-/*
- * Search for 8 pulses of ~equal duration. Even manchester starts with
- * at least 8 of them like that, while ASK will always be at least
- * 8 bits anyway, so it's a good discriminant
- */
-AVR_CR(cr_syncsearch)
-{
-	uint8_t pi = current_pulse;
-	uint8_t syncstart = 0;
-	uint8_t synclen = 0;
-	uint8_t manchester = 0;
-	do {
-		while (pi == current_pulse || running_state != state_SyncSearch) {
-			if (running_state == state_SyncSearch) {
-				if (synclen == 0) {
-					if (!uart_rx_isempty(&uart_rx))
-						running_state = state_ReceivingCommand;
-				}
-			}
-			cr_yield(0);
-		}
-		while (pi != current_pulse && synclen < SYNC_LEN) {
-			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
-			uint16_t d = p0 + p1;
-
-			/*
-			 * this bit tries to adapt with manchester sequences that
-			 * don't start with a series of 'zeroes'...
-			 */
-			if (d > 0x70) {
-				if (abs_sub(p0 / 2, p1) < (d / 8)) {
-					p0 /= 2;
-					d = p0 + p1;
-				} else if (abs_sub(p0, p1 / 2) < (d / 8)) {
-					p1 /= 2;
-					d = p0 + p1;
-				} else if (abs_sub(d/2, syncduration) < (d / 16)) {
-					p1 /= 2; p0 /= 2;
-					d /= 2;
-				}
-			}
-			if (d < 0x20 || abs_sub(d, syncduration) > 8) {
-				syncstart = pi;
-				syncduration = d;
-				synclen = 0;
-				manchester = 0;
-				D(pin_clr(pin_Debug2);)
-			} else {
-				D(pin_set(pin_Debug2);)
-				if (abs_sub(p1, p0) < (d / 8))
-					manchester++;
-				/* Integrate half the difference with previous cycle,
-				 * turns out some transmitter start a bit sluggish
-				 * and gradually get to 'speed' */
-				syncduration += (d - syncduration) / 2;
-				synclen++;
-			}
-			pi++;
-		}
-
-		if (synclen == SYNC_LEN) {
-			uint8_t newstate = state_SyncSearch;
-			D(pin_set(pin_Debug1);)
-
-			if (flags.display_pulses)
-				newstate = state_DecodeRawPulses;
-			else if (syncduration > 0x80)
-				newstate = state_Decoding_OOK;
-			else if (manchester > 4)
-				newstate = state_Decoding_Manchester;
-			else
-				newstate = state_Decoding_ASK;
-			// init decoders
-			while (newstate != state_SyncSearch) {
-				msg_start = syncstart;
-
-				chk = 0x55;
-				bcount = 0;
-				byte = 0;
-				msg_end = 0;
-				decoded = 0;
-				running_state = newstate;
-
-				while (running_state != state_SyncSearch)
-					cr_yield(1);
-				/*
-				 * if ASK fails (it's strict) and we had a small
-				 * chance of doing some manchester, well, try again
-				 * with manchester, you never know
-				 */
-				if (newstate == state_Decoding_ASK &&
-						manchester && !decoded) {
-					newstate = state_Decoding_Manchester;
-				} else
-					break;
-			}
-			synclen = manchester = syncduration = 0;
-			pi = msg_start;// play catchup
-			syncstart = pi+1;
-			D(pin_clr(pin_Debug1);)
-		}
-	} while (1);
-}
-
 AVR_CR(cr_syncsearch_backward)
 {
 	uint8_t pi = current_pulse;
@@ -363,10 +256,8 @@ AVR_CR(cr_syncsearch_backward)
 	do {
 		while (pi == current_pulse || running_state != state_SyncSearch) {
 			if (running_state == state_SyncSearch) {
-			//	if (synclen == 0) {
-					if (!uart_rx_isempty(&uart_rx))
-						running_state = state_ReceivingCommand;
-			//	}
+				if (!uart_rx_isempty(&uart_rx))
+					running_state = state_ReceivingCommand;
 			}
 			cr_yield(0);
 		}
@@ -376,303 +267,242 @@ AVR_CR(cr_syncsearch_backward)
 
 			if (gotsync)
 				msg_end = pi;
+			pi++;
 		}
-		printf("gotsync %d at %d\n", gotsync, msg_end);
 		if (!gotsync)
 			continue;
 
+//		printf("sync @%2x\n", msg_end);
 		/* Now walk backward for pulses that look interesting */
 
-		pi--;	// start one pulse before end
+		D(pin_set(pin_Debug1);)
+		pi = msg_end-1;	// start one pulse before end
 		// get an arbitrary pulse size to get started
 		syncduration = 0;
 		uint8_t ook = 0, ask = 0, manchester = 0;
-		do {
-			uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
-			uint16_t d = p0 + p1;
 
-			if (syncduration == 0)
-				syncduration = d;
-
-			if (d > 0x70)
-				ook++;
-
-			if (abs_sub(p0 / 2, p1) < (d / 16)) {
+		uint8_t p0 = pulse[pi][0], p1 = pulse[pi][1];
+		if (p0 > p1) {
+			uint8_t t = p1; p1 = p0; p0 = t;
+		}
+		if (p1 == MAX_TICKS_PER_PHASE)
+			p1 = p0 * 2;
+		if (abs_sub(p0, p1) < 8) {
+			// if short side is nearly equal long side, it's manchester
+			manchester++;
+			// if we see we are going to overflow, we know it's two
+			// long pulses. Not foolproof tho...
+			if (p0 > 0x70)
 				p0 /= 2;
-				d = p0 + p1;
-			} else if (abs_sub(p0, p1 / 2) < (d / 16)) {
-				p1 /= 2;
-				d = p0 + p1;
-			} else if (abs_sub(d/2, syncduration) < (d / 16)) {
-				p1 /= 2; p0 /= 2;
-				d /= 2;
-			}
-			if (syncduration == 0)
-				syncduration = d;
+			syncduration = p0 + p0;
+		} else if (abs_sub(p0 * 2, p1 - p0) < 12) {
+			// if short side is about 1/3 of the long side, it's ask
+			ask = 1;
+			syncduration = p0 + p1;
+		} else { /* rest is likely manchester? */
+			//if (abs_sub(p0 * 2, p1)) {
+			// if short side is half as long as long side, it's manchester
+			manchester++;
+			syncduration = p0 + p0;
+		}
+//		printf("dur %x(%2x/%2x)@%2x ", syncduration,p0,p1,pi);
+		if (syncduration < 0x20) {
+			pi = msg_end + 1;
+			D(pin_clr(pin_Debug1);)
+			continue;
+		}
 
-			if (abs_sub(p1, p0) < (d / 8))
-				manchester++;
-			else if (abs_sub(d, syncduration) < 8)
-				ask++;
-			else {
-				// we're done! doesn't match any of this
+		do {
+			uint8_t d0 = pulse[pi][0], d1 = pulse[pi][1];
+			uint16_t d = d0 + d1;
+
+			if (d0 == MAX_TICKS_PER_PHASE)
+				break;
+			if (ask) {
+				if (abs_sub(d, syncduration) < (syncduration / 4))
+					ask++;
+				else
+					break;
+			} else if (manchester) {
+				if (d > 0x70)
+					ook++;
+				else if (d0 > (p0 - 8) && d1 > (p0 - 8))
+					manchester++;
+				else {
+//					printf("[%x]d0:%x d1:%x, p0:%x p1:%x ",pi,d0,d1,p0,p1);
+					break;
+				}
 			}
 			pi--;
 		} while (pi != msg_end);
 
 		msg_start = pi + 1;
-		uint8_t count = ovf_sub(msg_end, msg_start);
-		printf("msg at %d is %d long ook:%d man:%d ask:%d\n",
-			msg_start, count, ook, manchester, ask);
+		pi = msg_end + 1;
+
+		uint8_t count = ovf_sub(msg_start, msg_end);
+//		printf("@%2x-%2x: %dp ook:%d man:%d ask:%d\n",
+//			msg_start, msg_end, count, ook, manchester, ask);
+		if (count < 20)	// too small, don't bother
+			continue;
+
+		uint8_t newstate = state_SyncSearch;
+		D(pin_set(pin_Debug1);)
+
+		if (flags.display_pulses)
+			newstate = state_DecodeRawPulses;
+		else if (ook > manchester)
+			newstate = state_Decoding_OOK;
+		else if (ask > 0)
+			newstate = state_Decoding_ASK;
+		else
+			newstate = state_Decoding_Manchester;
+		// init decoders
+
+		chk = 0x55;
+		bcount = 0;
+		byte = 0;
+		running_state = newstate;
+
+		while (running_state != state_SyncSearch)
+			cr_yield(1);
+
+		D(pin_clr(pin_Debug1);)
+		pi = msg_end + 1;
 
 	} while (1);
 }
 
+static void finish_message()
+{
+	chk += bcount;
+	chk += syncduration;
+	if (bcount)
+		printf_P(PSTR("#%02x!%0x*%02x\n"),
+				bcount, syncduration, chk);
+	running_state = state_SyncSearch;
+}
 
 /*
- * After we got a sync, and it's been decided it's ASK, go on
- * and do the decoding on the fly until and end of pulse
+ * After we got a sync, and it's been decided it's ASK,
+ * format it accordingly
  */
-AVR_CR(cr_decode_ask)
+void decode_ask()
 {
-	do {
-		cr_yield(0);
+	uint8_t pi = msg_start;
 
-		uint8_t pi = msg_start;
-		uint8_t pcount = 0;
-		/*
-		 * we look for 20 bits of valid data before we go ahead and
-		 * decide it's a nice message. Pointless to print garbage if it
-		 * doesn't match what we need. This will happen pretty often
-		 */
-		while (pcount < 20) {
-			while (pi == current_pulse)
-				cr_yield(0);
-			uint8_t d = pulse[pi][0] + pulse[pi][1];
-			if (abs_sub(d, syncduration) <= 8) {
-				pcount++;
-				pi++;
-			} else
-				break;
-		}
-		if (pcount < 20) {
-			decoded = 0;
-			msg_start = pi;
-			running_state = state_SyncSearch;
-			continue;
-		}
-		/*
-		 * Ok, seems we're happy we got a message, print it until
-		 * a long pulse
-		 */
+	pi = msg_start;	/* restart at beginning */
+	uart_putchar('M', 0);
+	uart_putchar('A', 0);
+	uart_putchar(':', 0);
 
-		pi = msg_start;	/* restart at beginning */
-		decoded = 1;
-		uart_putchar('M', 0);
-		uart_putchar('A', 0);
-		uart_putchar(':', 0);
+	while (pi != msg_end) {
+		uint8_t last = (pi + 1) == msg_end;
+
+		uint8_t b = pulse[pi][1] > pulse[pi][0];
+		D(pin_set_to(pin_Debug3, b);)
+		stuffbit(b, last);
+		pi++;
 		D(pin_set_to(pin_Debug3, 0);)
-		do {
-			// wait for bits
-			while (pi == current_pulse)
-				cr_yield(0);
-			while (pi != current_pulse && !msg_end) {
-				uint8_t b = pulse[pi][1] > pulse[pi][0];
-				D(pin_set_to(pin_Debug3, b);)
-				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
-				stuffbit(b, msg_end);
-				pi++;
-				D(pin_set_to(pin_Debug3, 0);)
-			}
-		} while (!msg_end);
-		running_state = state_DecodeDone;
-		msg_start = pi;
-		D(pin_set_to(pin_Debug3, 0);)
-	} while (1);
+	}
+	finish_message();
 }
 
 
 /*
  * After we got a sync, and it's been decided it's OOK, go on
- * and do the decoding on the fly until and end of pulse
+ * format it accordingly
  */
-AVR_CR(cr_decode_ook)
+void decode_ook()
 {
-	do {
-		cr_yield(0);
+	uint8_t pi = msg_start;
+	uint8_t margin = (syncduration / 8);// + (syncduration / 16);
 
-		uint8_t pi = msg_start;
-		uint8_t pcount = 0;
-		uint8_t margin = (syncduration / 8);// + (syncduration / 16);
-		/*
-		 * we look for 20 bits of valid data before we go ahead and
-		 * decide it's a nice message. Pointless to print garbage if it
-		 * doesn't match what we need. This will happen pretty often
-		 */
-		while (pcount < 20) {
-			while (pi == current_pulse)
-				cr_yield(0);
-			if (abs_sub(pulse[pi][0], syncduration) <= margin ||
-					abs_sub(pulse[pi][1], syncduration) <= margin ||
-					abs_sub(pulse[pi][0], syncduration / 2) <= margin ||
-					abs_sub(pulse[pi][1], syncduration / 2) <= margin) {
-				pcount++;
-				pi++;
-			} else
-				break;
-		}
-		if (pcount < 20) {
-			decoded = 0;
-			msg_start = pi;
-			running_state = state_SyncSearch;
-			continue;
-		}
-		/*
-		 * Ok, seems we're happy we got a message, print it until
-		 * a long pulse
-		 */
+	pi = msg_start;	/* restart at beginning */
+	uart_putchar('M', 0);
+	uart_putchar('O', 0);
+	uart_putchar(':', 0);
 
-		pi = msg_start;	/* restart at beginning */
-		decoded = 1;
-		uart_putchar('M', 0);
-		uart_putchar('O', 0);
-		uart_putchar(':', 0);
-		D(pin_set_to(pin_Debug3, 0);)
-		do {
-			// wait for bits
-			while (pi == current_pulse)
-				cr_yield(0);
-			while (pi != current_pulse && !msg_end) {
-				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
+	while (pi != msg_end) {
+		uint8_t last = (pi + 1) == msg_end;
 
-				if (abs_sub(pulse[pi][0], syncduration) <= margin)
-					stuffbit(0, msg_end);
-				if (abs_sub(pulse[pi][1], syncduration) <= margin)
-					stuffbit(1, msg_end);
-				pi++;
-			}
-		} while (!msg_end);
-		running_state = state_DecodeDone;
-		msg_start = pi;
-		D(pin_set_to(pin_Debug3, 0);)
-	} while (1);
+		uint8_t zero = abs_sub(pulse[pi][0], syncduration) <= margin;
+		uint8_t one = abs_sub(pulse[pi][1], syncduration) <= margin;
+
+		if (zero)
+			stuffbit(0, last && !one);
+		if (one)
+			stuffbit(1, last);
+		pi++;
+	}
+	finish_message();
 }
 
 /*
  * After we got a sync, and it's been decided it's manchester, go on
- * and do the decoding on the fly until and end of pulse
+ * format it accordingly
  */
-AVR_CR(cr_decode_manchester)
+void decode_manchester()
 {
-	do {
-		cr_yield(0);
+	uint8_t pi = msg_start;
+	uint8_t margin = (syncduration / 4);// + (syncduration / 16);
 
-		uint8_t pi = msg_start;
-		uint8_t pcount = 0;
-		uint8_t margin = (syncduration / 4);// + (syncduration / 16);
+	pi = msg_start;	/* restart at beginning */
+	uart_putchar('M', 0);
+	uart_putchar('M', 0);
+	uart_putchar(':', 0);
 
-		/*
-		 * we look for 20 bits of valid data before we go ahead and
-		 * decide it's a nice message. Pointless to print garbage if it
-		 * doesn't match what we need. This will happen pretty often
-		 */
-		while (pcount < 32) {
-			while (pi == current_pulse)
-				cr_yield(0);
-			if (abs_sub(pulse[pi][0], syncduration) <= margin ||
-					abs_sub(pulse[pi][1], syncduration) <= margin ||
-					abs_sub(pulse[pi][0], syncduration / 2) <= margin ||
-					abs_sub(pulse[pi][1], syncduration / 2) <= margin) {
-				pcount++;
-				pi++;
-			} else
-				break;
+	// We know what a half pulse is, it's synclen / 2
+	uint8_t bit = 0, phase = 0;
+	uint8_t demiclock = 0;
+	uint8_t stuffclock = 0;
+	while (pi != msg_end) {
+		uint8_t last = (pi + 1) == msg_end;
+
+		uint8_t b0 = 0, b1 = 0;
+		if (stuffclock != demiclock) {
+			if (stuffclock & 1)
+				b0 = 0x2 + bit;
+			stuffclock++;
 		}
-		if (pcount < 32) {
-			decoded = 0;
-			msg_start = pi;
-			running_state = state_SyncSearch;
-			continue;
+		// if the phase is double the demiclock, change polarity
+		if (abs_sub(pulse[pi][phase], syncduration) < margin) {
+			bit = phase;
+			demiclock++;
+		}
+		demiclock++;
+		if (stuffclock != demiclock) {
+			if (stuffclock & 1)
+				b1 = 0x2 + bit;
+			stuffclock++;
 		}
 
-		pi = msg_start;	/* restart at beginning */
-		decoded = 1;
-		uart_putchar('M', 0);
-		uart_putchar('M', 0);
-		uart_putchar(':', 0);
-		D(pin_set_to(pin_Debug3, 0);)
-		// We know what a half pulse is, it's synclen / 2
-		uint8_t bit = 0, phase = 1;
-		uint8_t demiclock = 0;
-		uint8_t stuffclock = 0;
+		if (phase == 0) pi++;
+		phase = !phase;
 
-		do {
-			// wait for bits
-			while (pi == current_pulse)
-				cr_yield(0);
-
-			/*
-			 * Count demi-clocks; stuff the current bit value at each
-			 * cycles, and change the bit values when we get a phase
-			 * that is more than a demi syncduration.
-			 */
-			while (pi != current_pulse && !msg_end) {
-				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
-
-				if (stuffclock != demiclock) {
-					if (stuffclock & 1)
-						stuffbit(bit, msg_end);
-					stuffclock++;
-				}
-				// if the phase is double the demiclock, change polarity
-				if (abs_sub(pulse[pi][phase], syncduration) < margin) {
-					bit = phase;
-					demiclock++;
-				}
-				demiclock++;
-				if (stuffclock != demiclock) {
-					if (stuffclock & 1)
-						stuffbit(bit, msg_end);
-					stuffclock++;
-				}
-
-				if (phase == 0) pi++;
-				phase = !phase;
-			}
-		} while (!msg_end && bcount < 0xd0);
-
-		running_state = state_DecodeDone;
-		msg_start = pi;
-		D(pin_set_to(pin_Debug3, 0);)
-	} while (1);
+		if (b0 & 0x2)
+			stuffbit(b0 & 1, last && !b1);
+		if (b1 & 0x2)
+			stuffbit(b1 & 1, last);
+	}
+	finish_message();
 }
 
 /*
  * Raw print of the pulses. Used for debug and in 'learning mode'
  * for remotes, buttons and so forth.
  */
-AVR_CR(cr_decode_pulses)
+void decode_pulses()
 {
-	do {
-		cr_yield(0);
+	uint8_t pi = msg_start;
+	printf_P(PSTR("MP:"));
 
-		uint8_t pi = msg_start;
-		printf_P(PSTR("MP:"));
-		do {
-			// wait for bits
-			while (pi == current_pulse)
-				cr_yield(0);
-			while (pi != current_pulse && !msg_end) {
-				msg_end = pulse[pi][0] >= MAX_TICKS_PER_PHASE;
-				printf_P(PSTR("%02x%02x"), pulse[pi][1], pulse[pi][0]);
-				chk += pulse[pi][1] + pulse[pi][0];
-				bcount++;
-				pi++;
-			}
-		} while (!msg_end);
-		msg_start = pi;
-		running_state = state_DecodeDone;
-	} while (1);
+	while (pi != msg_end) {
+		printf_P(PSTR("%02x%02x"), pulse[pi][1], pulse[pi][0]);
+		chk += pulse[pi][1] + pulse[pi][0];
+		bcount++;
+		pi++;
+	}
+	finish_message();
 }
 
 /*
@@ -901,11 +731,7 @@ again:
  * you have enabled STACK_DEBUG. The stacks are trimmed to the minimum
  * needed, so any strange behaviour should be looked at here, first
  */
-AVR_TASK(syncsearch, 64);
-AVR_TASK(decode_ask, 100);
-AVR_TASK(decode_ook, 100);
-AVR_TASK(decode_manchester, 100);
-AVR_TASK(decode_pulses, 64);
+AVR_TASK(syncsearch, 128);
 AVR_TASK(receive_cmd, 100);
 
 void rf_bridge_run() __attribute__((noreturn)) __attribute__((naked));
@@ -925,10 +751,6 @@ void rf_bridge_run()
 
 #ifdef STACK_DEBUG
 	memset(syncsearch.stack, 0xff, sizeof(syncsearch.stack));
-	memset(decode_ask.stack, 0xff, sizeof(decode_ask.stack));
-	memset(decode_ook.stack, 0xff, sizeof(decode_ook.stack));
-	memset(decode_manchester.stack, 0xff, sizeof(decode_manchester.stack));
-	memset(decode_pulses.stack, 0xff, sizeof(decode_pulses.stack));
 	memset(receive_cmd.stack, 0xff, sizeof(receive_cmd.stack));
 #endif
 
@@ -941,13 +763,8 @@ void rf_bridge_run()
 #endif
 
 	/* start coroutines on their own stacks */
-	cr_start(syncsearch, cr_syncsearch);
-	cr_start(decode_ask, cr_decode_ask);
-	cr_start(decode_ook, cr_decode_ook);
-	cr_start(decode_manchester, cr_decode_manchester);
-	cr_start(decode_pulses, cr_decode_pulses);
+	cr_start(syncsearch, cr_syncsearch_backward);
 	cr_start(receive_cmd, cr_receive_cmd);
-
 	enable_receiver();
 
 	while (1) {
@@ -958,30 +775,21 @@ void rf_bridge_run()
 				transceiver_mode = mode_Receiving;
 				cr_resume(syncsearch);
 				break;
-			case state_Decoding_ASK:
-				cr_resume(decode_ask);
-				break;
-			case state_Decoding_OOK:
-				cr_resume(decode_ook);
-				break;
-			case state_Decoding_Manchester:
-				cr_resume(decode_manchester);
-				break;
-			case state_DecodeRawPulses:
-				cr_resume(decode_pulses);
-				break;
-			case state_DecodeDone: {
-				chk += bcount;
-				chk += syncduration;
-				if (bcount)
-					printf_P(PSTR("#%02x!%0x*%02x\n"),
-							bcount, syncduration, chk);
-				running_state = state_SyncSearch;
-				msg_end = 0;
-			}	break;
 			case state_ReceivingCommand: {
 				cr_resume(receive_cmd);
 			}	break;
+			case state_Decoding_ASK:
+				decode_ask();
+				break;
+			case state_Decoding_OOK:
+				decode_ook();//
+				break;
+			case state_Decoding_Manchester:
+				decode_manchester();
+				break;
+			case state_DecodeRawPulses:
+				decode_pulses();
+				break;
 		}
 
 #ifdef STACK_DEBUG
@@ -996,9 +804,6 @@ void rf_bridge_run()
 			printf_P(PSTR(#_name " %d/%d\n"), max-i, max);
 
 			print_stack(syncsearch);
-			print_stack(decode_ask);
-			print_stack(decode_manchester);
-			print_stack(decode_pulses);
 			print_stack(receive_cmd);
 		}
 #endif

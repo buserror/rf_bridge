@@ -19,7 +19,7 @@ The PCB is very simple, the arduino I picked is a Nano, and it's mounted vertica
 </p>
 
   * You can find the schematic as a [.PDF in this directory](rf_bridge_schematics.pdf). 
-  * The PCB was ordered from OSHPark ($9 for 3) -- unfortunatelly I had to tweak a couple of things since, so I won't publish the 'share' link until the version 1.1 is tested.
+  * The PCB was ordered from OSHPark ($9 for 3) -- You can order PCBs directly from [this link](https://oshpark.com/shared_projects/YTztWeXs).
 
 ##The BOM:
 
