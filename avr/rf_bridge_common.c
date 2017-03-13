@@ -300,7 +300,6 @@ AVR_CR(cr_syncsearch_backward)
 			ask = 1;
 			syncduration = p0 + p1;
 		} else { /* rest is likely manchester? */
-			//if (abs_sub(p0 * 2, p1)) {
 			// if short side is half as long as long side, it's manchester
 			manchester++;
 			syncduration = p0 + p0;
@@ -311,11 +310,6 @@ AVR_CR(cr_syncsearch_backward)
 			D(pin_clr(pin_Debug1);)
 			continue;
 		}
-		uint8_t samplecount = 0;
-		uint32_t signmask = 0;
-		uint8_t pcount[32];
-		for (uint8_t i = 0; i < 32; i++)
-			pcount[i] = 0;
 		do {
 			uint8_t d0 = pulse[pi][0], d1 = pulse[pi][1];
 			uint16_t d = d0 + d1;
@@ -333,12 +327,13 @@ AVR_CR(cr_syncsearch_backward)
 				if (d0 > 0x7f) d0 = 0x7f;
 				if (d1 > 0x7f) d1 = 0x7f;
 
-				if (!(signmask & (7L << ((d0 / 4)-1)))) {
-					printf("d0 out at bit %d (%x) %08lx\n", samplecount, d0,
-						1L << (d0/4));
+				if (!(signmask & (1L << ((d0 / 4))))) {
+					printf("d0 out @ %d (%x) %08lx\n", samplecount, d0,
+							1L << (d0/4));
 				}
-				if (!(signmask & (7L << ((d1 / 4)-1)))) {
-					printf("d1 out at bit %d (%x)\n", samplecount, d1);
+				if (!(signmask & (1L << ((d1 / 4))))) {
+					printf("d1 out @ %d (%x) %08lx\n", samplecount, d1,
+							1L << (d1/4));
 				}
 			}
 			samplecount++;
