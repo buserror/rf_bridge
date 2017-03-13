@@ -44,7 +44,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
-#include "matches.h"
+#include "conf_matches.h"
 
 #ifdef MQTT
 #include <mosquitto.h>
@@ -60,7 +60,8 @@
 #include <unistd.h>
 
 struct mosquitto *mosq = NULL;
-
+#endif
+/* TODO: Make these config options */
 struct {
 	const char *name;
 } mqtt_weather_name[8] = {
@@ -68,11 +69,10 @@ struct {
 		[1].name = "lounge",
 		[2].name = "lab",
 };
-#endif
 
 const char *mqtt_root = "mqtt";
-
-
+int mqtt_qos = 1;
+bool mqtt_retain = 1;
 
 const char *serial_path = NULL;
 int serial_fd = -1;
@@ -146,12 +146,14 @@ weather_decode(
 				temp / 10, temp % 10,
 				bat ? " LOW BAT":"");
 
-#ifdef MQTT
 		char *root;
 		if (mqtt_weather_name[channel].name)
-			asprintf(&root, "%s/sensor/%s", mqtt_root, mqtt_weather_name[channel].name);
+			asprintf(&root, "%s/sensor/%s",
+					mqtt_root?mqtt_root : "",
+					mqtt_weather_name[channel].name);
 		else
-			asprintf(&root, "%s/sensor/%d", mqtt_root, channel);
+			asprintf(&root, "%s/sensor/%d",
+					mqtt_root?mqtt_root:"", channel);
 
 		char *v;
 		asprintf(&v, "{"
@@ -159,123 +161,20 @@ weather_decode(
 				"\"h\":%d,"
 				"\"lbat\":%s,"
 				"\"ch\":%d"
-				"}"
-				,
+				"}",
 				temp / 10, temp % 10,
 				hum,
 				bat ? "true":"false",
-				channel
-			);
+				channel );
 		printf("%s %s\n", root, v);
-		mosquitto_publish(mosq, NULL, root, strlen(v), v, 1, true);
+#ifdef MQTT
+		if (mqtt_root)
+			mosquitto_publish(mosq, NULL, root, strlen(v),
+					v, mqtt_qos, mqtt_retain);
 #endif
-
 	}
 }
 
-
-void
-pulse_decoder(
-		msg_p m,
-		msg_p o)
-{
-	uint8_t end = m->bytecount;
-	uint8_t start = 0;
-	uint8_t pi = 0;
-
-	uint8_t syncstart = 0;
-	uint8_t syncduration = 0;
-	uint8_t synclen = 0;
-	uint8_t manchester = 0;
-
-	typedef uint8_t pulse_t[2];
-	pulse_t *pulse = (pulse_t *)m->msg;
-
-	/*
-	 * Search for 8 pulses of ~equal duration. Even manchester starts with
-	 * at least 8 of them like that, while ASK will always be at least
-	 * 8 bits anyway, so it's a good discriminant
-	 */
-	while (pi != end && synclen < 8) {
-		uint8_t d = pulse[pi][0] + pulse[pi][1];
-		if (d < 12 || abs_sub(d, syncduration) > 8) {
-			syncstart = pi;
-			syncduration = d;
-			synclen = 0;
-			manchester = 0;
-		} else {
-			if (abs_sub(pulse[pi][1], pulse[pi][0]) < 12)
-				manchester++;
-			else
-				manchester = 0;
-			if (debug_sync > 1)
-				printf("sync %d delta %d/%d = %d\n", synclen,
-					syncduration, d, syncduration - d);
-			/* Integrate half the difference with previous cycle,
-			 * turns out some transmitter start a bit sluggish
-			 * and gradually get to 'speed' */
-			syncduration += (d - syncduration) / 2;
-			synclen++;
-		}
-		pi++;
-	}
-	if (debug_sync)
-		printf("syncstart %d synclen = %d, manchester: %d\n", syncstart,
-			synclen, manchester);
-	if (pi == end) {
-		printf("MN:%d\n", ovf_sub(start, end));
-		return;
-	}
-	msg_init(o, manchester ? 'M' : 'A');
-	o->pulse_duration = syncduration;
-	o->decoded = 1;
-
-	if (!manchester) {
-		pi = syncstart;
-		while (pi != end) {
-			uint8_t bit = pulse[pi][1] > pulse[pi][0];
-			msg_stuffbit(o, bit);
-			pi++;
-		}
-	} else {
-		// We know what a half pulse is, it's synclen / 2
-		pi = syncstart + (synclen - manchester);
-		if (synclen - manchester)
-			printf("** Adjusted start %d huh %d\n", pi,
-					synclen - manchester);
-		uint8_t bit = 0, phase = 1;
-		uint8_t demiclock = 0;
-		uint8_t stuffclock = 0;
-		uint8_t margin = o->pulse_duration / 4;
-
-		/*
-		 * Could demi-clocks; stuff the current bit value at each cycles,
-		 * and change the bit values when we get a phase that is more than
-		 * a demi synclen.
-		 */
-		while (pi != end) {
-			if (stuffclock != demiclock) {
-				if (stuffclock & 1)
-					msg_stuffbit(o, bit);
-				stuffclock++;
-			}
-			// if the phase is double the demiclock, change polarity
-			if (abs_sub(pulse[pi][phase], syncduration) < margin) {
-				bit = phase;
-				demiclock++;
-			}
-			demiclock++;
-			if (stuffclock != demiclock) {
-				if (stuffclock & 1)
-					msg_stuffbit(o, bit);
-				stuffclock++;
-			}
-
-			if (phase == 0) pi++;
-			phase = !phase;
-		}
-	}
-}
 
 static void
 display(
@@ -395,6 +294,8 @@ main(
 			mqtt_hostname = argv[++i];
 		} else if (!strcmp(argv[i], "-r") && i < (argc-1)) {
 			mqtt_root = argv[++i];
+		} else if (!strcmp(argv[i], "--no-mqtt")) {
+			mqtt_root = NULL;
 		} else if (!strcmp(argv[i], "-p") && i < (argc-1)) {
 			mqtt_password = argv[++i];
 		} else if (!strcmp(argv[i], "-m") && i < (argc-1)) {
@@ -447,7 +348,7 @@ main(
 	if (!mqtt_password)
 		mqtt_password = getenv("MQTT_PASS");
 
-	if (mqtt_hostname) {
+	if (mqtt_hostname && mqtt_root) {
 		mosquitto_lib_init();
 
 		char *client;
@@ -509,12 +410,6 @@ main(
 
 		if (u.m.checksum_valid) {
 			msg_p d = &u.m;
-			msg_full_t full;
-
-			if (d->bitcount && d->pulses) {
-				pulse_decoder(d, &full.m);
-				d = &full.m;
-			}
 			display(d);
 
 			msg_match_t *m = matches;
@@ -525,7 +420,8 @@ main(
 						!memcmp(m->msg.msg, d->msg, d->bytecount)) {
 					if (now - m->last > 500) {
 #ifdef MQTT
-						mosquitto_publish(mosq, NULL,
+						if (mqtt_root)
+							mosquitto_publish(mosq, NULL,
 								m->mqtt_path,
 								strlen(m->mqtt_pload), m->mqtt_pload,
 								1, true);

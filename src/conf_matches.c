@@ -5,10 +5,11 @@
  *      Author: michel
  */
 
+#include "conf_matches.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include "matches.h"
 
 msg_match_t * matches = NULL;
 /* TODO: Put that in the environment */
@@ -19,6 +20,7 @@ parse_matches(
 		fileio_p file,
 		char * l )
 {
+	const char * key = strsep(&l, " \t");
 	const char * msg = strsep(&l, " \t");
 	const char * mqtt_path = strsep(&l, " \t");
 	const char * mqtt_qos = strsep(&l, " \t");
@@ -26,6 +28,12 @@ parse_matches(
 
 	//printf("%d %s %s %s %s\n",  file->linecount, msg,
 	//		mqtt_path, mqtt_qos, mqtt_pload);
+	if (strcmp(key, "map")) {
+		fprintf(stderr, "%s:%d invalid config keyword '%s'\n",
+				file->fname, file->linecount, key);
+		return -1;
+	}
+
 	if (!msg || msg[0] != 'M' || (msg[1] != 'A' && msg[1] != 'M')) {
 		fprintf(stderr, "%s:%d invalid message format\n",
 				file->fname, file->linecount);
