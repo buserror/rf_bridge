@@ -311,13 +311,22 @@ AVR_CR(cr_syncsearch_backward)
 			D(pin_clr(pin_Debug1);)
 			continue;
 		}
-
+		uint32_t signmask = 0;
+		uint8_t pcount[32];
+		for (uint8_t i = 0; i < 32; i++)
+			pcount[i] = 0;
 		do {
 			uint8_t d0 = pulse[pi][0], d1 = pulse[pi][1];
 			uint16_t d = d0 + d1;
 
 			if (d0 == MAX_TICKS_PER_PHASE)
 				break;
+			for (uint8_t i = 0; i < 1; i++) {
+				uint8_t v = pulse[pi][i];
+				if (v > 0x7f) v = 0x7f;
+				pcount[v / 4]++;
+				signmask |= (1L << (v / 4));
+			}
 			if (ask) {
 				if (abs_sub(d, syncduration) < (syncduration / 4))
 					ask++;
@@ -344,7 +353,16 @@ AVR_CR(cr_syncsearch_backward)
 //			msg_start, msg_end, count, ook, manchester, ask);
 		if (count < 20)	// too small, don't bother
 			continue;
-
+		const char *h = "0123456789abcdef";
+		for (uint8_t i = 0; i < 32; i++) {
+			uart_putchar(':', 0);
+			uart_putchar(h[pcount[i] >> 4], 0);
+			uart_putchar(h[pcount[i] & 0xf], 0);
+		}
+		uart_putchar('=', 0);
+		for (uint8_t i = 0; i < 8; i++)
+			uart_putchar(h[(signmask >> ((7-i) * 4)) & 0xf], 0);
+		printf("\n");
 		uint8_t newstate = state_SyncSearch;
 		D(pin_set(pin_Debug1);)
 
