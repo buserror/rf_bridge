@@ -44,7 +44,7 @@
 #include <arpa/inet.h>
 #include <sys/time.h>
 
-#include "conf_matches.h"
+#include "conf.h"
 
 #ifdef MQTT
 #include <mosquitto.h>
@@ -70,14 +70,15 @@ struct {
 		[2].name = "lab",
 };
 
-const char *mqtt_root = "mqtt";
-int mqtt_qos = 1;
-bool mqtt_retain = 1;
+conf_t g_conf = {
+	.mqtt = {
+		.hostname = "localhost",
+		.port = 1883,
+	},
+};
 
 const char *serial_path = NULL;
 int serial_fd = -1;
-
-unsigned debug_sync;
 
 static uint64_t gettime_ms()
 {
@@ -126,6 +127,8 @@ weather_chk(
 
 static void
 weather_decode(
+		conf_mqtt_t *mqtt,
+		conf_sensor_t *sensors,
 		msg_p m)
 {
 	uint8_t * msg = m->msg;
@@ -147,13 +150,13 @@ weather_decode(
 				bat ? " LOW BAT":"");
 
 		char *root;
-		if (mqtt_weather_name[channel].name)
+		if (sensors->sensor[channel].name)
 			asprintf(&root, "%s/sensor/%s",
-					mqtt_root?mqtt_root : "",
-					mqtt_weather_name[channel].name);
+					mqtt->root,
+					sensors->sensor[channel].name);
 		else
 			asprintf(&root, "%s/sensor/%d",
-					mqtt_root?mqtt_root:"", channel);
+					mqtt->root, channel);
 
 		char *v;
 		asprintf(&v, "{"
@@ -168,7 +171,7 @@ weather_decode(
 				channel );
 		printf("%s %s\n", root, v);
 #ifdef MQTT
-		if (mqtt_root)
+		if (mqtt->root[0])
 			mosquitto_publish(mosq, NULL, root, strlen(v),
 					v, mqtt_qos, mqtt_retain);
 #endif
@@ -196,7 +199,7 @@ display(
 				msg_shift(m, shift);
 
 			//	printf("Weather %08x shift %d bcount %d\n", w, shift, bcount);
-				weather_decode(m);
+				weather_decode(&g_conf.mqtt, &g_conf.sensors, m);
 				break;
 			}
 		}
@@ -230,7 +233,7 @@ mq_message_cb(
 		printf(">> %s %s\n", message->topic, (char*)message->payload);
 	}
 
-	msg_match_t * m = matches;
+	msg_match_t * m = g_conf.switches.matches;
 	while (m) {
 		if (!strcmp(message->topic, m->mqtt_path)) {
 			if (m->pload_flags == flags) {
@@ -269,11 +272,43 @@ mq_connect_cb(
 		return;
 	}
 
-	msg_match_t * m = matches;
+	msg_match_t * m = g_conf.switches.matches;
 	while (m) {
 		mosquitto_subscribe(mosq, NULL, m->mqtt_path, 2);
 		m = m->next;
 	}
+}
+
+static void
+mqtt_connect(
+	conf_mqtt_t * mqtt )
+{
+
+	if (!mqtt->root[0]) {
+		printf("MQTT Not configured\n");
+		return;
+	}
+	mosquitto_lib_init();
+
+	char *client;
+	char hn[128];
+	gethostname(hn, sizeof(hn));
+	asprintf(&client, "%s/%s/%d", hn, "rf_bridge", getpid());
+	mosq = mosquitto_new(client, true, 0);
+
+	if (!mqtt->hostname[0])
+		strncpy(mqtt->hostname, hn, sizeof(mqtt->hostname));
+
+	mosquitto_connect_callback_set(mosq, mq_connect_cb);
+	mosquitto_message_callback_set(mosq, mq_message_cb);
+
+	int rc = mosquitto_connect_async(mosq, mqtt->hostname, mqtt->port, 60);
+	if (rc) {
+		perror("mosquitto_connect");
+		exit(1);
+	}
+	mosquitto_loop_start(mosq);
+	printf("MQTT started\n");
 }
 #endif /* MQTT */
 
@@ -284,22 +319,18 @@ main(
 		int argc,
 		const char *argv[])
 {
-	const char *mqtt_hostname = NULL;
-	const char *mqtt_password = NULL;
-	const char *mapping_path = NULL;
+	const char *conf_filename = NULL;
 	char line[1024];
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-h") && i < (argc-1)) {
-			mqtt_hostname = argv[++i];
+			strncpy(g_conf.mqtt.hostname, argv[++i], sizeof(g_conf.mqtt.hostname));
 		} else if (!strcmp(argv[i], "-r") && i < (argc-1)) {
-			mqtt_root = argv[++i];
+			strncpy(g_conf.mqtt.root, argv[++i], sizeof(g_conf.mqtt.root));
 		} else if (!strcmp(argv[i], "--no-mqtt")) {
-			mqtt_root = NULL;
-		} else if (!strcmp(argv[i], "-p") && i < (argc-1)) {
-			mqtt_password = argv[++i];
+			g_conf.mqtt.root[0] = 0;
 		} else if (!strcmp(argv[i], "-m") && i < (argc-1)) {
-			mapping_path = argv[++i];
+			conf_filename = argv[++i];
 		} else if (!serial_path)
 			serial_path = argv[i];
 		else {
@@ -315,15 +346,25 @@ main(
 				argv[0]);
 		exit(1);
 	}
-	if (mapping_path) {
+	if (conf_filename) {
 		fileio_t f = {
-				.f = fopen(mapping_path, "r"),
-				.fname = mapping_path,
+				.f = fopen(conf_filename, "r"),
+				.fname = conf_filename,
 		};
 		if (!f.f) {
 			perror(f.fname);
 			exit(1);
 		}
+		enum {
+			conf_switches = 0, // default
+			conf_mqtt,
+			conf_pir,
+			conf_sensors
+		};
+		int state = conf_switches;
+		static const char * states[] = {
+			"[switches]", "[mqtt]", "[pir]", "[sensors]", NULL
+		};
 		while (fgets(line, sizeof(line), f.f)) {
 			f.linecount++;
 			// strip empty lines, comments
@@ -334,51 +375,31 @@ main(
 				l++;
 			if (!*l || *l == '#') continue;
 
-			if (parse_matches(&f, l))
-					;
-
+			if (l[0] == '[') {
+				state = -1;
+				for (int i = 0; states[i] && state == -1; i++)
+					if (!strcmp(states[i], line))
+						state = i;
+				if (state == -1) {
+					fprintf(stderr, "%s:%d: invalid section %s\n",
+							f.fname, f.linecount, line);
+					break;
+				}
+				continue;
+			}
+			switch (state) {
+				case conf_switches:
+					if (parse_matches(&g_conf.mqtt, &g_conf.switches, &f, l))
+							;
+				break;
+			}
 		}
 		fclose(f.f);
 	}
 #ifdef MQTT
-	if (!mqtt_hostname)
-		mqtt_hostname = getenv("MQTT");
-	if (!mqtt_hostname)
-		mqtt_hostname = getenv("MQTT_HOST");
-	if (!mqtt_password)
-		mqtt_password = getenv("MQTT_PASS");
-
-	if (mqtt_hostname && mqtt_root) {
-		mosquitto_lib_init();
-
-		char *client;
-		char hn[128];
-		gethostname(hn, sizeof(hn));
-		asprintf(&client, "%s/%s/%d", hn, basename(strdup(argv[0])), getpid());
-		mosq = mosquitto_new(client, true, 0);
-
-		if (!mqtt_root)
-			mqtt_root = hn;	// safe, we don't return anytime soon
-		// TODO: CHANGE? login default to hostname
-		if (mqtt_password)
-			mosquitto_username_pw_set(mosq, hn, mqtt_password);
-
-		mosquitto_connect_callback_set(mosq, mq_connect_cb);
-		mosquitto_message_callback_set(mosq, mq_message_cb);
-
-		int rc = mosquitto_connect_async(mosq, mqtt_hostname, 1883, 60);
-		if (rc) {
-			perror("mosquitto_connect");
-			exit(1);
-		}
-		mosquitto_loop_start(mosq);
-		printf("MQTT started\n");
-	}
+	mqtt_connect(&g_conf.mqtt);
 #else
-	if (mqtt_hostname) {
-		fprintf(stderr, "%s MQTT is disabled!\n", argv[0]);
-		exit(1);
-	}
+	fprintf(stderr, "%s MQTT is not compiled in!\n", argv[0]);
 #endif
 	/* in case it's a serial port do stuff to it */
 	{
@@ -412,7 +433,7 @@ main(
 			msg_p d = &u.m;
 			display(d);
 
-			msg_match_t *m = matches;
+			msg_match_t *m = g_conf.switches.matches;
 			uint16_t want = ((uint16_t*)d->msg)[0];
 			uint64_t now = gettime_ms();
 			while (m) {
@@ -420,7 +441,7 @@ main(
 						!memcmp(m->msg.msg, d->msg, d->bytecount)) {
 					if (now - m->last > 500) {
 #ifdef MQTT
-						if (mqtt_root)
+						if (g_conf.mqtt.root[0])
 							mosquitto_publish(mosq, NULL,
 								m->mqtt_path,
 								strlen(m->mqtt_pload), m->mqtt_pload,

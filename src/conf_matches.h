@@ -26,8 +26,13 @@ typedef struct msg_match_t {
 	char 			_data[];
 } msg_match_t;
 
+struct conf_mqtt_t;
+struct conf_switch_t;
+
 int
 parse_matches(
+		struct conf_mqtt_t * mqtt,
+		struct conf_switch_t * conf,
 		fileio_p file,
 		char * l );
 

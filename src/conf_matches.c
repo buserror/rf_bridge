@@ -5,18 +5,16 @@
  *      Author: michel
  */
 
-#include "conf_matches.h"
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-msg_match_t * matches = NULL;
-/* TODO: Put that in the environment */
-extern const char *mqtt_root;
+#include "conf.h"
 
 int
 parse_matches(
+		struct conf_mqtt_t * mqtt,
+		struct conf_switch_t * conf,
 		fileio_p file,
 		char * l )
 {
@@ -46,7 +44,7 @@ parse_matches(
 	}
 
 	int size = strlen(msg) + 1 +
-			strlen(mqtt_root) + 1 +
+			strlen(mqtt->root) + 1 +
 			strlen(mqtt_path) + 1 +
 			(mqtt_pload ? strlen(mqtt_pload) + 1 : 0) +
 			sizeof (msg_match_t);
@@ -60,7 +58,7 @@ parse_matches(
 	}
 	char *d = m->_data;
 	strcpy(d, msg); m->msg_txt = d; d += strlen(d) + 1;
-	sprintf(d, "%s/%s", mqtt_root, mqtt_path);
+	sprintf(d, "%s/%s", mqtt->root, mqtt_path);
 	m->mqtt_path = d; d += strlen(d) + 1;
 	if (mqtt_pload) {
 		strcpy(d, mqtt_pload); m->mqtt_pload = d; d+= strlen(d) + 1;
@@ -73,9 +71,9 @@ parse_matches(
 		m->mqtt_qos = atoi(mqtt_qos);
 	m->lineno = file->linecount;
 
-	if (matches)
-		m->next = matches;
-	matches = m;
+	if (conf->matches)
+		m->next = conf->matches;
+	conf->matches = m;
 
 	return 0;
 }
