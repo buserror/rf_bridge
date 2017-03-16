@@ -17,8 +17,7 @@ typedef struct msg_match_t {
 		msg_t			msg;
 		uint8_t 		b[sizeof(msg_t) + (256/8)];
 	};
-	int 				mqtt_qos : 4,
-					pload_flags : 3, lineno;
+	uint32_t				pload_flags : 3, lineno;
 	uint64_t			last;	// last time this was sent
 	const char * 	msg_txt;
 	const char *		mqtt_path;
@@ -30,12 +29,10 @@ struct conf_mqtt_t;
 struct conf_switch_t;
 
 int
-parse_matches(
+parse_switch(
 		struct conf_mqtt_t * mqtt,
 		struct conf_switch_t * conf,
 		fileio_p file,
 		char * l );
-
-extern msg_match_t * matches;
 
 #endif /* _MATCHES_H_ */

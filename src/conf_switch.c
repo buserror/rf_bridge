@@ -4,7 +4,7 @@
  *  Created on: 27 Feb 2017
  *      Author: michel
  */
-
+#define _GNU_SOURCE         /* See feature_test_macros(7) */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -12,16 +12,16 @@
 #include "conf.h"
 
 int
-parse_matches(
+parse_switch(
 		struct conf_mqtt_t * mqtt,
 		struct conf_switch_t * conf,
 		fileio_p file,
-		char * l )
+		char * line )
 {
+	char *l = strdupa(line);
 	const char * key = strsep(&l, " \t");
 	const char * msg = strsep(&l, " \t");
 	const char * mqtt_path = strsep(&l, " \t");
-	const char * mqtt_qos = strsep(&l, " \t");
 	const char * mqtt_pload = strsep(&l, " \t");
 
 	//printf("%d %s %s %s %s\n",  file->linecount, msg,
@@ -67,8 +67,6 @@ parse_matches(
 		if (strstr(mqtt_pload, "\"on\":false"))
 			m->pload_flags |= 2;
 	}
-	if (mqtt_qos)
-		m->mqtt_qos = atoi(mqtt_qos);
 	m->lineno = file->linecount;
 
 	if (conf->matches)

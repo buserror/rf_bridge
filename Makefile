@@ -66,9 +66,9 @@ rfbridge328: ${O}/atmega328p_rf_bridge.axf
 		avrdude -p m328p -b 57600 -c arduino -P /dev/ttyUSB1 -D -Uflash:w:$^
 
 ${O}/rf_bridged: ${wildcard src/*.c}
-	${E}echo CC ${^}
+	${E}echo CC ${filter %.c, $^}
 	${E}${CC} -o $@ -MMD -std=gnu99 -g -Og ${EXTRA_CFLAGS} \
-		$^ -Wall \
+		${filter %.c, $^} -Wall \
 		-DMQTT -lmosquitto
 
 deb:

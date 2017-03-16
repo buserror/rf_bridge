@@ -731,7 +731,7 @@ again:
  * you have enabled STACK_DEBUG. The stacks are trimmed to the minimum
  * needed, so any strange behaviour should be looked at here, first
  */
-AVR_TASK(syncsearch, 128);
+AVR_TASK(syncsearch, 64);
 AVR_TASK(receive_cmd, 100);
 
 void rf_bridge_run() __attribute__((noreturn)) __attribute__((naked));

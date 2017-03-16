@@ -61,19 +61,23 @@
 
 struct mosquitto *mosq = NULL;
 #endif
-/* TODO: Make these config options */
-struct {
-	const char *name;
-} mqtt_weather_name[8] = {
-		[0].name = "outside",
-		[1].name = "lounge",
-		[2].name = "lab",
-};
 
 conf_t g_conf = {
 	.mqtt = {
 		.hostname = "localhost",
 		.port = 1883,
+		.def = {
+			.qos = 1,
+			.retain = 1,
+		},
+	},
+	.sensors.msg = {
+		.qos = 1,
+		.retain = 0,
+	},
+	.switches.msg = {
+		.qos = 1,
+		.retain = 0,
 	},
 };
 
@@ -173,7 +177,7 @@ weather_decode(
 #ifdef MQTT
 		if (mqtt->root[0])
 			mosquitto_publish(mosq, NULL, root, strlen(v),
-					v, mqtt_qos, mqtt_retain);
+					v, sensors->msg.qos, sensors->msg.retain);
 #endif
 	}
 }
@@ -329,7 +333,8 @@ main(
 			strncpy(g_conf.mqtt.root, argv[++i], sizeof(g_conf.mqtt.root));
 		} else if (!strcmp(argv[i], "--no-mqtt")) {
 			g_conf.mqtt.root[0] = 0;
-		} else if (!strcmp(argv[i], "-m") && i < (argc-1)) {
+		} else if ((!strcmp(argv[i], "-c") || !!strcmp(argv[i], "--conf")) &&
+				i < (argc-1)) {
 			conf_filename = argv[++i];
 		} else if (!serial_path)
 			serial_path = argv[i];
@@ -340,8 +345,8 @@ main(
 	}
 	if (argc == 1 || !serial_path) {
 		fprintf(stderr,
-				"%s: [-h <mqtt_hostname>] [-p <mtqq_password>] "
-				"[-r <mqtt root name>] [-m <message mapping filename] "
+				"%s: [-h <mqtt_hostname>] "
+				"[-r <mqtt root name>] [-c|--conf <config filename] "
 				"<serial port device file>\n",
 				argv[0]);
 		exit(1);
@@ -388,16 +393,25 @@ main(
 				continue;
 			}
 			switch (state) {
+				case conf_mqtt:
+					if (parse_mqtt(&g_conf.mqtt, &f, l))
+						exit(1);
+					break;
+				case conf_sensors:
+					if (parse_sensor(&g_conf.sensors, &f, l))
+						exit(1);
+					break;
 				case conf_switches:
-					if (parse_matches(&g_conf.mqtt, &g_conf.switches, &f, l))
-							;
-				break;
+					if (parse_switch(&g_conf.mqtt, &g_conf.switches, &f, l))
+						exit(1);
+					break;
 			}
 		}
 		fclose(f.f);
 	}
 #ifdef MQTT
-	mqtt_connect(&g_conf.mqtt);
+	if (g_conf.mqtt.root[0])
+		mqtt_connect(&g_conf.mqtt);
 #else
 	fprintf(stderr, "%s MQTT is not compiled in!\n", argv[0]);
 #endif
@@ -445,7 +459,8 @@ main(
 							mosquitto_publish(mosq, NULL,
 								m->mqtt_path,
 								strlen(m->mqtt_pload), m->mqtt_pload,
-								1, true);
+								g_conf.sensors.msg.qos,
+								g_conf.sensors.msg.retain);
 						printf("%s %s\n", m->mqtt_path, m->mqtt_pload);
 #endif
 					}
