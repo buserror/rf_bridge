@@ -418,7 +418,7 @@ main(
 	/* in case it's a serial port do stuff to it */
 	{
 		const char * stty =
-			"stty 115200 -clocal -icanon -hupcl -cread -opost -echo <%s >/dev/null 2>&1";
+			"stty 115200 clocal -icanon -hupcl -cread -opost -echo -F %s >/dev/null 2>&1";
 		char * d = malloc(strlen(stty) + strlen(serial_path) + 10);
 
 		sprintf(d, stty, serial_path);
@@ -432,6 +432,7 @@ main(
 		perror(serial_path);
 		exit(1);
 	}
+	printf("Ready...\n");
 	msg_full_t u;
 	while (fgets(line, sizeof(line), f)) {
 		// strip line
