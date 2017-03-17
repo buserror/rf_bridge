@@ -38,8 +38,17 @@ typedef struct conf_mqtt_t {
 
 typedef struct conf_switch_t {
 	conf_mqtt_flags_t msg;
-	msg_match_t * matches;
+	msg_switch_t * matches;
 } conf_switch_t;
+
+typedef struct conf_pir_t {
+	conf_mqtt_flags_t msg;
+	union {
+		msg_t			mask;
+		uint8_t 		b[sizeof(msg_t) + (256/8)];
+	};
+	msg_switch_t * pir;
+} conf_pir_t;
 
 typedef struct conf_sensor_t {
 	conf_mqtt_flags_t msg;
@@ -53,6 +62,7 @@ typedef struct conf_t {
 	conf_mqtt_t	mqtt;
 	conf_switch_t	switches;
 	conf_sensor_t	sensors;
+	conf_pir_t	pirs;
 } conf_t;
 
 int

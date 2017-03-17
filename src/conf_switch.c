@@ -24,30 +24,22 @@
 
 #include "conf.h"
 
-int
-parse_switch(
+
+static int
+parse_mapping(
 		struct conf_mqtt_t * mqtt,
-		struct conf_switch_t * conf,
+		struct msg_switch_t ** queue,
 		fileio_p file,
 		char * line )
 {
 	char *l = strdupa(line);
-	const char * key = strsep(&l, " \t");
-	const char * msg = strsep(&l, " \t");
-	const char * mqtt_path = strsep(&l, " \t");
-	const char * mqtt_pload = strsep(&l, " \t");
+	const char * msg = strtok_r(l, " \t", &l);
+	const char * mqtt_path = strtok_r(l, " \t", &l);
+	const char * mqtt_pload = strtok_r(l, " \t", &l);
 
-	//printf("%d %s %s %s %s\n",  file->linecount, msg,
-	//		mqtt_path, mqtt_qos, mqtt_pload);
-	if (strcmp(key, "map")) {
-		fprintf(stderr, "%s:%d invalid config keyword '%s'\n",
-				file->fname, file->linecount, key);
-		return -1;
-	}
-
-	if (!msg || msg[0] != 'M' || (msg[1] != 'A' && msg[1] != 'M')) {
-		fprintf(stderr, "%s:%d invalid message format\n",
-				file->fname, file->linecount);
+	if (!msg || msg[0] != 'M') {
+		fprintf(stderr, "%s:%d invalid message format '%s'\n",
+				file->fname, file->linecount, msg);
 		return -1;
 	}
 	if (!mqtt_path) {
@@ -60,8 +52,8 @@ parse_switch(
 			strlen(mqtt->root) + 1 +
 			strlen(mqtt_path) + 1 +
 			(mqtt_pload ? strlen(mqtt_pload) + 1 : 0) +
-			sizeof (msg_match_t);
-	msg_match_t *m = calloc(1, size);
+			sizeof (msg_switch_t);
+	msg_switch_t *m = calloc(1, size);
 
 	if (msg_parse(&m->msg, 256, msg) != 0) {
 		fprintf(stderr, "%s:%d Can't parse '%s'\n",
@@ -82,9 +74,60 @@ parse_switch(
 	}
 	m->lineno = file->linecount;
 
-	if (conf->matches)
-		m->next = conf->matches;
-	conf->matches = m;
+	if (*queue)
+		m->next = *queue;
+	*queue = m;
+
+	return 0;
+}
+
+int
+parse_switch(
+		struct conf_mqtt_t * mqtt,
+		struct conf_switch_t * conf,
+		fileio_p file,
+		char * line )
+{
+	char *l = strdupa(line);
+	const char * key = strtok_r(l, " \t=", &l);
+
+	if (!strcmp(key, "map")) {
+		parse_mapping(mqtt, &conf->matches, file, l);
+	} else if (parse_mqtt_flags(&conf->msg, file, line)) {
+		fprintf(stderr, "%s:%d invalid config keyword '%s'\n",
+				file->fname, file->linecount, key);
+		return -1;
+	}
+
+	return 0;
+}
+
+
+int
+parse_pir(
+		struct conf_mqtt_t * mqtt,
+		struct conf_pir_t * conf,
+		fileio_p file,
+		char * line )
+{
+	char *l = strdupa(line);
+	const char * key = strtok_r(l, " \t=", &l);
+
+	if (!strcmp(key, "pir")) {
+		parse_mapping(mqtt, &conf->pir, file, l);
+	} else if (!strcmp(key, "mask")) {
+		const char * msg = strtok_r(l, " \t", &l);
+		printf("msg %s\n", msg);
+		if (!msg || msg_parse(&conf->mask, 128, msg) != 0) {
+			fprintf(stderr, "%s:%d Can't parse '%s'\n",
+					file->fname, file->linecount, msg);
+			return -1;
+		}
+	} else if (parse_mqtt_flags(&conf->msg, file, line)) {
+		fprintf(stderr, "%s:%d invalid config keyword '%s'\n",
+				file->fname, file->linecount, key);
+		return -1;
+	}
 
 	return 0;
 }

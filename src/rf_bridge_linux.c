@@ -219,7 +219,7 @@ mq_message_cb(
 		printf(">> %s %s\n", message->topic, (char*)message->payload);
 	}
 
-	msg_match_t * m = g_conf.switches.matches;
+	msg_switch_t * m = g_conf.switches.matches;
 	while (m) {
 		if (!strcmp(message->topic, m->mqtt_path)) {
 			if (m->pload_flags == flags) {
@@ -258,7 +258,7 @@ mq_connect_cb(
 		return;
 	}
 
-	msg_match_t * m = g_conf.switches.matches;
+	msg_switch_t * m = g_conf.switches.matches;
 	while (m) {
 		mosquitto_subscribe(mosq, NULL, m->mqtt_path, 2);
 		m = m->next;
@@ -345,7 +345,7 @@ main(
 		enum {
 			conf_switches = 0, // default
 			conf_mqtt,
-			conf_pir,
+			conf_pirs,
 			conf_sensors
 		};
 		int state = conf_switches;
@@ -383,6 +383,10 @@ main(
 					if (parse_sensor(&g_conf.sensors, &f, l))
 						exit(1);
 					break;
+				case conf_pirs:
+					if (parse_pir(&g_conf.mqtt, &g_conf.pirs, &f, l))
+						exit(1);
+					break;
 				case conf_switches:
 					if (parse_switch(&g_conf.mqtt, &g_conf.switches, &f, l))
 						exit(1);
@@ -415,6 +419,7 @@ main(
 		exit(1);
 	}
 	printf("Ready...\n");
+	msg_display(stdout, &g_conf.pirs.mask, "pir mask");
 	msg_full_t u;
 	while (fgets(line, sizeof(line), f)) {
 		// strip line
@@ -426,31 +431,74 @@ main(
 		if (msg_parse(&u.m, 512, line) != 0)
 			continue;
 
-		if (u.m.checksum_valid) {
-			msg_p d = &u.m;
-			display(d);
+		if (!u.m.checksum_valid)
+			continue;
 
-			msg_match_t *m = g_conf.switches.matches;
-			uint16_t want = ((uint16_t*)d->msg)[0];
-			uint64_t now = gettime_ms();
-			while (m) {
-				if (*((uint16_t*)m->msg.msg) == want &&
-						!memcmp(m->msg.msg, d->msg, d->bytecount)) {
-					if (now - m->last > 500) {
+		msg_p d = &u.m;
+		display(d);
+		/*
+		 * Check for 'switch' messages
+		 */
+		msg_switch_t *m = g_conf.switches.matches;
+		uint16_t want = ((uint16_t*)d->msg)[0];
+		uint64_t now = gettime_ms();
+		int done = 0;
+		while (m) {
+			if (*((uint16_t*)m->msg.msg) == want &&
+					!memcmp(m->msg.msg, d->msg, d->bytecount)) {
+				if (now - m->last > 500) {
+#ifdef MQTT
+					if (g_conf.mqtt.root[0])
+						mosquitto_publish(mosq, NULL,
+							m->mqtt_path,
+							strlen(m->mqtt_pload), m->mqtt_pload,
+							g_conf.sensors.msg.qos,
+							g_conf.sensors.msg.retain);
+					printf("%s %s\n", m->mqtt_path, m->mqtt_pload);
+#endif
+				}
+				done++;
+				m->last = now;
+			}
+			m = m->next;
+		}
+		if (done)
+			continue;
+		/*
+		 * now look for the PIRs, with mask
+		 */
+		m = g_conf.pirs.pir;
+		msg_p mask = &g_conf.pirs.mask;
+		while (m) {
+			if (d->bitcount >= m->msg.bitcount) {
+				int ok = 1;
+				for (int i = 0; i < d->bytecount && ok; i++) {
+					uint8_t b1 = d->msg[i] & mask->msg[i];
+					uint8_t b2 = m->msg.msg[i] & mask->msg[i];
+
+					if (b1 != b2) {
+						ok = 0;
+					//	if (i) msg_display(stdout, &m->msg, "almost?");
+					}
+				}
+				if (ok) {
+					msg_display(stdout, &m->msg, "MATCH!");
+					if (now - m->last > 5000) {
 #ifdef MQTT
 						if (g_conf.mqtt.root[0])
 							mosquitto_publish(mosq, NULL,
 								m->mqtt_path,
 								strlen(m->mqtt_pload), m->mqtt_pload,
-								g_conf.sensors.msg.qos,
-								g_conf.sensors.msg.retain);
+								g_conf.pirs.msg.qos,
+								g_conf.pirs.msg.retain);
 						printf("%s %s\n", m->mqtt_path, m->mqtt_pload);
 #endif
 					}
+					done++;
 					m->last = now;
 				}
-				m = m->next;
 			}
+			m = m->next;
 		}
 	}
 	fclose(f);
