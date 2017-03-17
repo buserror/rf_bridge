@@ -1,23 +1,5 @@
 /*
-	RF433 transceiver firmware.
-
-	This program was made to interface an basic cheapo transceiver 433Mhz
-	module with a (linux) host, to let it handle 'grown up' already
-	decoded messages for example to use with MQTT, home automation,
-	Alexa/Echo and so forth.
-
-	This was made to filter in 433MHZ messages from various remotes and
-	sensors, so some appropriate processing on the fly, and pass that
-	onward to a host computer for 'real' processing.
-
-	The idea is to have a free running pulse trail detection, and being
-	able to notice when it's no longer noise. Firmware can also detect
-	Amplitutde-Key Shifting (ASK) or if it's manchester encoding and
-	decode both on the fly.
-
-	In the other of operation, firmware can receive the same message
-	format with pulses length, and transmit them using a 433MHZ
-	transmitter.
+	RF to MQTT Bridge.
 
 	Copyright 2017 Michel Pollet <buserror@gmail.com>
 

@@ -1,5 +1,5 @@
 /*
- *	avr_cr.h
+ *	arduidiot.h
  *
  *	Copyright 2014 Michel Pollet <buserror@gmail.com>
  *
