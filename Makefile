@@ -4,11 +4,11 @@ SHELL			= /bin/bash
 FREQ 			= 16000000
 O 				= build
 
-TARGET			= rf_bridged
+TARGET			= rfbridged
 DESTDIR 		?= /
 SOV				= 1
-VERSION			= 0.90
-PKG				= 1
+VERSION			= 1.0b2
+PKG				= 3
 DESC			= 433Mhz to MQTT Bridge (Software part)
 
 ifeq (${V},)
@@ -26,7 +26,7 @@ EXTRA_CFLAGS	+= -DSIMAVR
 EXTRA_CFLAGS	+= -I$(SIMAVR)/simavr/sim/avr/
 endif
 
-all :  ${O} ${AVR_OBJ} ${O}/rf_bridged
+all :  ${O} ${AVR_OBJ} ${O}/$(TARGET)
 
 ${O}:
 	${E}mkdir -p build
@@ -65,7 +65,7 @@ rfbridge328: ${O}/atmega328p_rf_bridge.axf
 	make clean && make && \
 		avrdude -p m328p -b 57600 -c arduino -P /dev/ttyUSB1 -D -Uflash:w:$^
 
-${O}/rf_bridged: ${wildcard src/*.c}
+${O}/$(TARGET): ${wildcard src/*.c}
 	${E}echo CC ${filter %.c, $^}
 	${E}${CC} -o $@ -MMD -std=gnu99 -g -Og ${EXTRA_CFLAGS} \
 		${filter %.c, $^} -Wall \
@@ -77,13 +77,13 @@ deb:
 	mkdir -p $(O)/debian; (cd $(O)/debian; \
 	fpm -s dir -t deb -C /tmp/deb -n $(TARGET) -v $(VERSION) --iteration $(PKG) \
 		--description "$(DESC)" \
-		-d "libmosquito1 (>= 1.4.0)" \
+		-d "libmosquitto1 (>= 1.4.10)" \
 	)
 
-install: ${O}/rf_bridged
+install: ${O}/$(TARGET)
 	mkdir -p $(DESTDIR)/etc/ $(DESTDIR)/usr/bin $(DESTDIR)/usr/share/$(TARGET) && \
-	install -s ${O}/rf_bridged $(DESTDIR)/usr/bin/ && \
-		cp rf_bridged.conf $(DESTDIR)/etc/ && \
+	install -s ${O}/$(TARGET) $(DESTDIR)/usr/bin/ && \
+		cp $(TARGET).conf $(DESTDIR)/etc/ && \
 		cp ${O}/*.axf $(DESTDIR)/usr/share/$(TARGET)/
 
 -include ${wildcard ${O}/*.d}

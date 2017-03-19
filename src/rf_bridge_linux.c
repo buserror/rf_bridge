@@ -418,8 +418,6 @@ main(
 		perror(serial_path);
 		exit(1);
 	}
-	printf("Ready...\n");
-	msg_display(stdout, &g_conf.pirs.mask, "pir mask");
 	msg_full_t u;
 	while (fgets(line, sizeof(line), f)) {
 		// strip line
@@ -482,13 +480,14 @@ main(
 					}
 				}
 				if (ok) {
-					msg_display(stdout, &m->msg, "MATCH!");
-					if (now - m->last > 5000) {
+				//	msg_display(stdout, &m->msg, "MATCH!");
+					if (now - m->last > 20 * 1000) {
 #ifdef MQTT
 						if (g_conf.mqtt.root[0])
 							mosquitto_publish(mosq, NULL,
 								m->mqtt_path,
-								strlen(m->mqtt_pload), m->mqtt_pload,
+								m->mqtt_pload ? strlen(m->mqtt_pload):0,
+								m->mqtt_pload,
 								g_conf.pirs.msg.qos,
 								g_conf.pirs.msg.retain);
 						printf("%s %s\n", m->mqtt_path, m->mqtt_pload);

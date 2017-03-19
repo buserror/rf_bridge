@@ -37,7 +37,7 @@ parse_mapping(
 	const char * mqtt_path = strtok_r(l, " \t", &l);
 	const char * mqtt_pload = strtok_r(l, " \t", &l);
 
-	if (!msg || msg[0] != 'M') {
+	if (msg[0] != 'M') {
 		fprintf(stderr, "%s:%d invalid message format '%s'\n",
 				file->fname, file->linecount, msg);
 		return -1;
@@ -117,8 +117,7 @@ parse_pir(
 		parse_mapping(mqtt, &conf->pir, file, l);
 	} else if (!strcmp(key, "mask")) {
 		const char * msg = strtok_r(l, " \t", &l);
-		printf("msg %s\n", msg);
-		if (!msg || msg_parse(&conf->mask, 128, msg) != 0) {
+		if (msg_parse(&conf->mask, 128, msg) != 0) {
 			fprintf(stderr, "%s:%d Can't parse '%s'\n",
 					file->fname, file->linecount, msg);
 			return -1;
