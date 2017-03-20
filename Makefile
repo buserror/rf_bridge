@@ -7,8 +7,8 @@ O 				= build
 TARGET			= rfbridged
 DESTDIR 		?= /
 SOV				= 1
-VERSION			= 1.0b2
-PKG				= 3
+VERSION			= 1.0b4
+PKG				= 1
 DESC			= 433Mhz to MQTT Bridge (Software part)
 
 ifeq (${V},)
