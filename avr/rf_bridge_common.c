@@ -551,6 +551,11 @@ transmit_message()
 {
 	pulse[bcount][0] = MAX_TICKS_PER_PHASE; // long low pulse
 	pulse[bcount][1] = 0;
+	// add a bit of /extra/ padding here, pseudo random to help
+	// Prevent collisions.
+	bcount++;
+	pulse[bcount][0] = 0x10 + (tickcount & 0x7f);
+	pulse[bcount][1] = 0;
 	msg_end = bcount + 1;
 	msg_start = 0;
 	if (msg_end <= 16)	// too small, don't bother
