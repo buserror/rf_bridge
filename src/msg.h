@@ -23,11 +23,16 @@
 #include <stdio.h>
 #include <stdint.h>
 
+#include "list.h"	/* nicked from linux kernel */
+
 typedef struct msg_t {
-	uint32_t		pulses: 1, decoded: 1, type: 7, chk: 8, bitcount;
-	uint32_t		pulse_duration: 8, checksum_valid: 1,
-				max_size : 11, bytecount;
-	uint8_t		msg[0];
+	struct list_head send;
+	uint32_t		pulses: 1, decoded: 1,
+					type: 7, chk: 8, bitcount;
+	uint32_t		retries: 4,	/* for sending */
+					pulse_duration: 8, checksum_valid: 1,
+					max_size : 11, bytecount;
+	uint8_t			msg[0];
 } msg_t, *msg_p;
 
 typedef union {
