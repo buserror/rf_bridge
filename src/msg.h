@@ -27,6 +27,7 @@
 
 typedef struct msg_t {
 	struct list_head send;
+	uint64_t		stamp;	// last time sent
 	uint32_t		pulses: 1, decoded: 1,
 					type: 7, chk: 8, bitcount;
 	uint32_t		retries: 4,	/* for sending */

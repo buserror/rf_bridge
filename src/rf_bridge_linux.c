@@ -25,8 +25,10 @@
 #include <ctype.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #include "conf.h"
+#include "safelist.h"
 
 #ifdef MQTT
 #include <mosquitto.h>
@@ -66,8 +68,8 @@ conf_t g_conf = {
 const char *serial_path = NULL;
 int serial_fd = -1;
 
-LIST_HEAD(msg_sendqueue);
 
+safelist_t msg_sendqueue;
 
 static uint64_t gettime_ms()
 {
@@ -479,6 +481,7 @@ main(
 		}
 		fclose(f.f);
 	}
+	safelist_init(&msg_sendqueue);
 #ifdef MQTT
 	if (g_conf.mqtt.root[0])
 		mqtt_connect(&g_conf.mqtt);
@@ -486,7 +489,7 @@ main(
 	fprintf(stderr, "%s MQTT is not compiled in!\n", argv[0]);
 #endif
 	/* in case it's a serial port do stuff to it */
-	{
+	if (strcmp(serial_path, "-")) {
 		const char * stty =
 			"stty 115200 clocal -icanon -hupcl -cread -opost -echo -F %s >/dev/null 2>&1";
 		char * d = malloc(strlen(stty) + strlen(serial_path) + 10);
@@ -497,7 +500,7 @@ main(
 			;	// ok to fail
 		free(d);
 	}
-	FILE * f = fopen(serial_path, "r");
+	FILE * f = strcmp(serial_path, "-") ? fopen(serial_path, "r") : stdin;
 	if (!f) {
 		perror(serial_path);
 		exit(1);
@@ -523,8 +526,17 @@ main(
 		};
 		int ret = select(serial_fd + 1, &rd, NULL, NULL, &tv);
 		if (ret == 0) {	// timeout, lets see if we should send something
-			msg_p m = list_first_entry_or_null(&msg_sendqueue, msg_t, send);
-
+			safelist_lock(&msg_sendqueue);
+			msg_p m = list_first_entry_or_null(&msg_sendqueue.head, msg_t, send);
+			safelist_unlock(&msg_sendqueue);
+			if (!m)
+				continue;
+			safelist_del(&msg_sendqueue, &m->send);
+			m->stamp = gettime_ms();
+			if (m->retries)
+				m->retries--;
+			if (m->retries)
+				safelist_add_tail(&msg_sendqueue, &m->send);
 		} else {
 			if (!fgets(line, sizeof(line), f))
 				break;
@@ -544,8 +556,9 @@ main(
 			display(d);
 
 			if (match_switches(d) || match_pir(d)) {
-
+				/* add to a log? */
 			} else {
+				// likeky to be 'OK' or a garbled line
 			}
 		}
 	} while (true);
