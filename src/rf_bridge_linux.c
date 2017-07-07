@@ -228,23 +228,15 @@ mq_message_cb(
 	while (m) {
 		if (!strcmp(message->topic, m->mqtt_path)) {
 			if (m->pload_flags == flags) {
-				uint64_t now = gettime_ms();
-				if (now - m->last > 500) {
-					m->last = now;
-					msg_display(stdout, &m->msg, "SEND");
-
-					/* I feel slightly dirty here, but it allows
-					 * the serial port to stay available for writing commands
-					 * and stuff, and /normally/ messages aren't that often.
-					 * I'm sure linux will cope..?
-					 */
-					FILE *o = fopen(serial_path, "w");
-
-					if (o) {
-						msg_display(o, &m->msg, "");
-						fclose(o);
-						usleep(200000);
-					}
+				safelist_lock(&msg_sendqueue);
+				if (m->retries == 0) {
+					msg_display(stdout, &m->msg, "QUEUE");
+					m->retries = 2;
+					safelist_unlock(&msg_sendqueue);
+					safelist_add_tail(&msg_sendqueue, &m->send);
+				} else {
+					msg_display(stdout, &m->msg, "PENDING");
+					safelist_unlock(&msg_sendqueue);
 				}
 			}
 		}
@@ -507,6 +499,8 @@ main(
 	}
 	msg_full_t u;
 	int serial_fd = fileno(f);
+	FILE * serial_wr = NULL;
+	uint64_t last_recv = gettime_ms();
 	/*
 	 * the loop reads the serial port, primarily, however we use the 'select'
 	 * timeout to detect when last we received a message, and also to pace
@@ -522,16 +516,42 @@ main(
 		FD_SET(serial_fd, &rd);
 		struct timeval tv = {
 			.tv_sec = 0,
-			.tv_usec = 1000 /* 1ms*/ * 1000,
+			.tv_usec = 1000 /* 1ms*/ * 100, /* 100ms clock */
 		};
 		int ret = select(serial_fd + 1, &rd, NULL, NULL, &tv);
+		uint64_t now = gettime_ms();
+
 		if (ret == 0) {	// timeout, lets see if we should send something
+			if (now - last_recv < 1000)	// too early after a message was received
+				continue;
+
 			safelist_lock(&msg_sendqueue);
 			msg_p m = list_first_entry_or_null(&msg_sendqueue.head, msg_t, send);
 			safelist_unlock(&msg_sendqueue);
-			if (!m)
+
+			if (m && (now - m->stamp) < 1000) // too early to retry, bail
+				continue;
+			/* nothing to send, close serial port, if it was open */
+			if (!m) {
+				if (serial_wr) {
+					if (serial_wr != stdout)
+						fclose(serial_wr);
+					serial_wr = NULL;
+				}
+				continue;
+			}
+			/* Something to send, open the port, if it wasn't open */
+			if (serial_wr == NULL) {
+				serial_wr = strcmp(serial_path, "-") ?
+									fopen(serial_path, "w") : stdout;
+				if (!serial_wr)
+					perror(serial_path);
+			}
+			if (!serial_wr)	// retry later
 				continue;
 			safelist_del(&msg_sendqueue, &m->send);
+			msg_display(stdout, m, "SEND");
+			msg_display(serial_wr, m, "");
 			m->stamp = gettime_ms();
 			if (m->retries)
 				m->retries--;
@@ -554,7 +574,7 @@ main(
 
 			msg_p d = &u.m;
 			display(d);
-
+			last_recv = now;
 			if (match_switches(d) || match_pir(d)) {
 				/* add to a log? */
 			} else {
