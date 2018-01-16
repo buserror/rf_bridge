@@ -69,7 +69,7 @@ ${O}/$(TARGET): ${wildcard src/*.c}
 	${E}echo CC ${filter %.c, $^}
 	${E}${CC} -o $@ -MMD -std=gnu99 -g -Og ${EXTRA_CFLAGS} \
 		${filter %.c, $^} -Wall \
-		-DMQTT -lmosquitto
+		${shell [ -f /usr/include/mosquitto.h ] && echo -lmosquitto -DMQTT || echo -DNO_MQTT}
 
 deb:
 	rm -rf /tmp/deb

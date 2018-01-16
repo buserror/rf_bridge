@@ -1,3 +1,4 @@
+// vim: expandtab:ts=4
 /*
 	RF to MQTT Bridge.
 
@@ -141,16 +142,18 @@ weather_decode(
 				bat ? " LOW BAT":"");
 
 		char *root;
-		if (sensors->sensor[channel].name)
-			asprintf(&root, "%s/sensor/%s",
+		if (sensors->sensor[channel].name) {
+			if (asprintf(&root, "%s/sensor/%s",
 					mqtt->root,
-					sensors->sensor[channel].name);
-		else
-			asprintf(&root, "%s/sensor/%d",
-					mqtt->root, channel);
-
+					sensors->sensor[channel].name) <= 0)
+                        root = NULL;
+		} else {
+			if (asprintf(&root, "%s/sensor/%d",
+					mqtt->root, channel) <= 0)
+                        root = NULL;
+        }
 		char *v;
-		asprintf(&v, "{"
+		if (asprintf(&v, "{"
 				"\"c\":%d.%d,"
 				"\"h\":%d,"
 				"\"lbat\":%s,"
@@ -159,13 +162,16 @@ weather_decode(
 				temp / 10, temp % 10,
 				hum,
 				bat ? "true":"false",
-				channel );
+				channel ) <= 0)
+                    v = NULL;
 		printf("%s %s\n", root, v);
 #ifdef MQTT
 		if (mqtt->root[0])
 			mosquitto_publish(mosq, NULL, root, strlen(v),
 					v, sensors->msg.qos, sensors->msg.retain);
 #endif
+        free(root);
+        free(v);
 	}
 }
 
@@ -581,7 +587,7 @@ main(
 				// likeky to be 'OK' or a garbled line
 			}
 		}
-	} while (true);
+	} while (1);
 
 	fclose(f);
 }
